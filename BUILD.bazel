@@ -1,0 +1,248 @@
+load("@rules_apple//apple:apple.bzl", "apple_static_library", "apple_static_xcframework")
+load("@rules_apple//apple:ios.bzl", "ios_framework", "ios_static_framework", "ios_unit_test")
+load("@rules_apple//apple:resources.bzl", "apple_resource_bundle")
+load("@rules_swift//swift:swift.bzl", "swift_library")
+load("@rules_swift//swift:swift_interop_hint.bzl", "swift_interop_hint")
+
+package(default_visibility = ["//visibility:public"])
+
+# This BUILD file can be used standalone when GTXiLib is consumed as a dependency
+
+# Translations bundle - needs to preserve directory structure
+apple_resource_bundle(
+    name = "gtx_translations_bundle",
+    bundle_name = "ios_translations",
+    structured_resources = glob(["ios_translations.bundle/**/*"]),
+)
+
+cc_library(
+    name = "gtx_oop",
+    srcs = glob(["OOPClasses/**/*.cc"]),
+    hdrs = glob(["OOPClasses/**/*.h"]),
+    copts = [
+        "-std=c++20",
+    ],
+    includes = [
+        "OOPClasses",
+        "OOPClasses/Protos",
+    ],
+    deps = [
+        "@absl//absl/container:flat_hash_map",
+        "@absl//absl/strings",
+        "@absl//absl/strings:str_format",
+        "@absl//absl/types:optional",
+        "@absl//absl/types:span",
+        "@tinyxml2",
+    ],
+)
+
+swift_interop_hint(
+    name = "gtx_swift_interop_hint",
+    module_map = "GTXiLib.modulemap",
+    module_name = "GTXiLib",
+)
+
+objc_library(
+    name = "gtx_objc_core",
+    srcs = glob(
+        [
+            "Classes/**/*.m",
+            "Classes/**/*.mm",
+        ],
+        exclude = ["Classes/XCTest/*"],
+    ),
+    hdrs = glob(
+        ["Classes/**/*.h"],
+        exclude = ["Classes/XCTest/*"],
+    ),
+    aspect_hints = [":gtx_swift_interop_hint"],
+    copts = [
+        "-fblocks",
+    ],
+    data = [":gtx_translations_bundle"],
+    enable_modules = True,
+    includes = [
+        "Classes",
+        "Classes/ObjCPP",
+    ],
+    sdk_frameworks = [
+        "UIKit",
+        "Vision",
+    ],
+    deps = [":gtx_oop"],
+)
+
+objc_library(
+    name = "gtx_xctest",
+    srcs = glob(
+        [
+            "Classes/XCTest/*.m",
+            "Classes/XCTest/*.mm",
+        ],
+        allow_empty = True,
+    ),
+    hdrs = glob(["Classes/XCTest/*.h"]),
+    enable_modules = True,
+    includes = ["Classes/XCTest"],
+    sdk_frameworks = ["XCTest"],
+    deps = [":gtx_objc_core"],
+)
+
+swift_library(
+    name = "gtx_swift_tests",
+    testonly = True,
+    srcs = glob(["Tests/GTXTests/**/*.swift"]),
+    module_name = "GTXSwiftTests",
+    deps = [":gtx_objc_core"],
+)
+
+cc_library(
+    name = "gtx_oop_test_support",
+    testonly = True,
+    srcs = [
+        "Tests/Common/OOPTestLib/CPP/gtxtest_always_failing_check.cc",
+        "Tests/Common/OOPTestLib/CPP/gtxtest_always_passing_check.cc",
+    ],
+    hdrs = [
+        "Tests/Common/OOPTestLib/CPP/gtxtest_always_failing_check.h",
+        "Tests/Common/OOPTestLib/CPP/gtxtest_always_passing_check.h",
+    ],
+    copts = [
+        "-std=c++20",
+    ],
+    includes = ["Tests/Common/OOPTestLib/CPP"],
+    deps = [":gtx_oop"],
+)
+
+objc_library(
+    name = "gtx_test_app",
+    testonly = True,
+    srcs = glob(["Tests/Common/TestApp/Sources/*.m"]),
+    hdrs = glob(["Tests/Common/TestApp/Sources/*.h"]),
+    enable_modules = True,
+    includes = ["Tests/Common/TestApp/Sources"],
+    sdk_frameworks = ["UIKit"],
+    deps = [":gtx_objc_core"],
+)
+
+objc_library(
+    name = "gtx_ui_test_utils",
+    testonly = True,
+    srcs = ["Tests/Common/OOPTestLib/GTXUITestUtils.mm"],
+    hdrs = ["Tests/Common/OOPTestLib/GTXUITestUtils.h"],
+    enable_modules = True,
+    includes = ["Tests/Common/OOPTestLib"],
+    sdk_frameworks = [
+        "UIKit",
+        "XCTest",
+    ],
+    deps = [
+        ":gtx_test_app",
+        ":gtx_xctest",
+    ],
+)
+
+objc_library(
+    name = "gtx_oop_objcpp_test_support",
+    testonly = True,
+    srcs = ["Tests/Common/OOPTestLib/ObjCPP/GTXObjCPPTestUtils.mm"],
+    hdrs = ["Tests/Common/OOPTestLib/ObjCPP/GTXObjCPPTestUtils.h"],
+    enable_modules = True,
+    includes = ["Tests/Common/OOPTestLib/ObjCPP"],
+    sdk_frameworks = ["XCTest"],
+    deps = [
+        ":gtx_objc_core",
+        ":gtx_oop",
+        ":gtx_oop_test_support",
+    ],
+)
+
+objc_library(
+    name = "gtx_oop_unit_tests_lib",
+    testonly = True,
+    srcs = glob(["Tests/GTXOOPTests/UnitTests/*.mm"]),
+    data = [":gtx_translations_bundle"],
+    enable_modules = True,
+    sdk_frameworks = [
+        "CoreGraphics",
+        "CoreImage",
+        "XCTest",
+        "UIKit",
+    ],
+    deps = [
+        ":gtx_objc_core",
+        ":gtx_oop",
+        ":gtx_oop_objcpp_test_support",
+        ":gtx_oop_test_support",
+        ":gtx_ui_test_utils",
+    ],
+)
+
+ios_unit_test(
+    name = "gtx_oop_ios_unit_tests",
+    bundle_id = "com.google.gtx.GTXOOPUnitTests",
+    bundle_name = "GTXOOPUnitTests",
+    data = [":gtx_translations_bundle"],
+    families = [
+        "iphone",
+        "ipad",
+    ],
+    infoplists = ["Tests/GTXOOPTests/UnitTests/GTXOOPUnitTests-Info.plist"],
+    minimum_os_version = "12.0",
+    deps = [":gtx_oop_unit_tests_lib"],
+)
+
+apple_static_library(
+    name = "GTXiLib",
+    minimum_os_version = "9.0",
+    platform_type = "ios",
+    deps = [":gtx_objc_core"],
+)
+
+# iOS Static Framework for distribution
+ios_static_framework(
+    name = "GTXiLib_framework",
+    bundle_name = "GTXiLib",
+    minimum_os_version = "12.0",
+    deps = [":gtx_objc_core"],
+)
+
+ios_framework(
+    name = "GTXiLib_dynamic_framework",
+    bundle_id = "com.google.GTXiLib",
+    bundle_name = "GTXiLib",
+    families = [
+        "iphone",
+        "ipad",
+    ],
+    infoplists = ["FrameworkFiles/Info.plist"],
+    minimum_os_version = "12.0",
+    deps = [":gtx_objc_core"],
+)
+
+# XCFramework combining device and simulator builds
+apple_static_xcframework(
+    name = "GTXiLib_xcframework",
+    avoid_deps = [":gtx_translations_bundle"],
+    bundle_name = "GTXiLib",
+    ios = {
+        "simulator": [
+            "x86_64",
+            "arm64",
+        ],
+        "device": ["arm64"],
+    },
+    minimum_os_versions = {
+        "ios": "12.0",
+    },
+    public_hdrs = glob(
+        ["Classes/**/*.h"],
+        exclude = [
+            "Classes/XCTest/*",
+            "Classes/ObjCPP/*.h",
+            "Classes/GTXiLib.h",  # Exclude umbrella header from public_hdrs
+        ],
+    ),
+    umbrella_header = "Classes/GTXiLib.h",
+    deps = [":gtx_objc_core"],
+)

@@ -17,7 +17,7 @@
 #ifndef GTXILIB_OOPCLASSES_LOCALIZED_STRING_IDS_H_
 #define GTXILIB_OOPCLASSES_LOCALIZED_STRING_IDS_H_
 
-#include <abseil/absl/strings/string_view.h>
+#include "absl/strings/string_view.h"
 
 namespace gtx {
 

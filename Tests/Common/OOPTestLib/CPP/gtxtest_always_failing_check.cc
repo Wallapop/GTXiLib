@@ -16,7 +16,7 @@
 
 #include "gtxtest_always_failing_check.h"
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "check.h"
 
 namespace gtxtest {

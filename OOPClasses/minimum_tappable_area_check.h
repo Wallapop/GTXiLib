@@ -19,7 +19,7 @@
 
 #include <string>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "metadata_map.h"
 #include "typedefs.h"
 #include "check.h"

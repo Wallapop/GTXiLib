@@ -16,7 +16,7 @@
 
 #include "xml_utils.h"
 
-#include <abseil/absl/strings/str_cat.h>
+#include "absl/strings/str_cat.h"
 
 namespace gtx {
 

@@ -16,7 +16,7 @@
 
 #include "accessibility_hierarchy_searching.h"
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "typedefs.h"
 
 namespace gtx {

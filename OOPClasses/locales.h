@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include <abseil/absl/strings/string_view.h>
+#include "absl/strings/string_view.h"
 
 namespace gtx {
 

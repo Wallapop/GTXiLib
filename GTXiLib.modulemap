@@ -1,5 +1,5 @@
 module GTXiLib {
-  umbrella header "GTXiLib.h"
+  umbrella header "Classes/GTXiLib.h"
 
   export *
   module * { export * }

@@ -11,3 +11,8 @@ xcuserdata/
 
 # Carthage
 Carthage/Build
+
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-GTXiLib

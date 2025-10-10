@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include <abseil/absl/strings/str_cat.h>
+#include "absl/strings/str_cat.h"
 #include "NSString+GTXAdditions.h"
 #include "accessibility_hierarchy_searching.h"
 #include "gtx.pb.h"

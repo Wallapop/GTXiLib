@@ -18,7 +18,7 @@
 
 #import <XCTest/XCTest.h>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #import "GTXLocalizedStringsManagerUtils.h"
 #include "GTXProtoUtils.h"
 #import "NSString+GTXAdditions.h"

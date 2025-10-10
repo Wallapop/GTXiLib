@@ -35,7 +35,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)testIsStaticTextElementStaticTextTraitNoElementType {
   UIElementProto proto;
-  proto.set_ax_traits((uint64)gtx::ElementTrait::kStaticText);
+  proto.set_ax_traits((uint64_t)gtx::ElementTrait::kStaticText);
   XCTAssertTrue(gtx::IsStaticTextElement(proto));
 }
 
@@ -48,7 +48,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)testIsStaticTextElementStaticTextTraitAndElementType {
   UIElementProto proto;
-  proto.set_ax_traits((uint64)gtx::ElementTrait::kStaticText);
+  proto.set_ax_traits((uint64_t)gtx::ElementTrait::kStaticText);
   proto.set_element_type(gtxilib::oopclasses::protos::
                              ElementType_ElementTypeEnum_STATIC_TEXT);
   XCTAssertTrue(gtx::IsStaticTextElement(proto));
@@ -61,7 +61,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)testIsTextDisplayingElementTextDisplayingTraitNoElementType {
   UIElementProto proto;
-  proto.set_ax_traits((uint64)gtx::ElementTrait::kStaticText);
+  proto.set_ax_traits((uint64_t)gtx::ElementTrait::kStaticText);
   XCTAssertTrue(gtx::IsTextDisplayingElement(proto));
 }
 
@@ -74,7 +74,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)testIsTextDisplayingElementTextDisplayingTraitAndElementType {
   UIElementProto proto;
-  proto.set_ax_traits((uint64)gtx::ElementTrait::kSearchField);
+  proto.set_ax_traits((uint64_t)gtx::ElementTrait::kSearchField);
   proto.set_element_type(
       gtxilib::oopclasses::protos::ElementType_ElementTypeEnum_TEXT_VIEW);
   XCTAssertTrue(gtx::IsTextDisplayingElement(proto));
@@ -87,7 +87,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)testIsButtonElementButtonTraitNoElementType {
   UIElementProto proto;
-  proto.set_ax_traits((uint64)gtx::ElementTrait::kButton);
+  proto.set_ax_traits((uint64_t)gtx::ElementTrait::kButton);
   XCTAssertTrue(gtx::IsButtonElement(proto));
 }
 
@@ -100,7 +100,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)testIsButtonElementButtonTraitButtonElementType {
   UIElementProto proto;
-  proto.set_ax_traits((uint64)gtx::ElementTrait::kButton);
+  proto.set_ax_traits((uint64_t)gtx::ElementTrait::kButton);
   proto.set_element_type(
       gtxilib::oopclasses::protos::ElementType_ElementTypeEnum_BUTTON);
   XCTAssertTrue(gtx::IsButtonElement(proto));

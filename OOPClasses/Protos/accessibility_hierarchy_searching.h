@@ -17,7 +17,7 @@
 #ifndef GTXILIB_OOPCLASSES_PROTOS_ACCESSIBILITY_HIERARCHY_SEARCHING_H_
 #define GTXILIB_OOPCLASSES_PROTOS_ACCESSIBILITY_HIERARCHY_SEARCHING_H_
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "typedefs.h"
 
 namespace gtx {

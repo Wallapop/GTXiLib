@@ -19,7 +19,7 @@
 #include <memory>
 #include <vector>
 
-#include <abseil/absl/strings/string_view.h>
+#include "absl/strings/string_view.h"
 #include "accessibility_label_not_punctuated_check.h"
 #include "contrast_check.h"
 #include "minimum_tappable_area_check.h"

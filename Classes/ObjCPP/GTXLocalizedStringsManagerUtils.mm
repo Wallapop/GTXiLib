@@ -27,11 +27,57 @@ static NSString *const kGTXTranslationsBundleResourceName = @"ios_translations.b
 @implementation GTXLocalizedStringsManagerUtils
 
 + (std::unique_ptr<gtx::LocalizedStringsManager>)defaultLocalizedStringsManager {
+  // Try to find the bundle in multiple locations to support both app and test contexts
   NSString *subbundlePath =
       [[NSBundle bundleForClass:self] pathForResource:kGTXTranslationsBundleResourceName
                                                ofType:nil];
-  std::string strings_directory =
-      [[[NSBundle bundleWithPath:subbundlePath] resourcePath] gtx_stdString];
+
+  // If not found in the class bundle, try the main bundle (for test contexts)
+  if (subbundlePath == nil) {
+    subbundlePath = [[NSBundle mainBundle] pathForResource:kGTXTranslationsBundleResourceName
+                                                    ofType:nil];
+  }
+
+  // Also try looking for bundle name without .bundle extension
+  if (subbundlePath == nil) {
+    subbundlePath = [[NSBundle mainBundle] pathForResource:@"ios_translations"
+                                                     ofType:@"bundle"];
+  }
+
+  // Determine the strings directory path
+  NSString *strings_directory_path;
+  if (subbundlePath != nil) {
+    // Bundle found - check if Bazel nested the bundle
+    // (i.e., ios_translations.bundle/ios_translations.bundle/Strings-*)
+    NSString *nestedBundlePath = [subbundlePath stringByAppendingPathComponent:@"ios_translations.bundle"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:nestedBundlePath isDirectory:nil]) {
+      strings_directory_path = nestedBundlePath;
+    } else {
+      // Not nested, use the bundle path directly
+      strings_directory_path = subbundlePath;
+    }
+  } else {
+    // Bundle not found - check if Strings-en directory exists directly in main bundle
+    // (Bazel might flatten the bundle contents into the test bundle)
+    NSString *enStringsPath = [[NSBundle mainBundle] pathForResource:@"Strings-en/strings"
+                                                              ofType:@"xml"];
+    if (enStringsPath != nil) {
+      // Found Strings-en, use parent directory (main bundle resource path)
+      strings_directory_path = [[NSBundle mainBundle] resourcePath];
+    } else {
+      // Last resort: check in bundleForClass
+      enStringsPath = [[NSBundle bundleForClass:self] pathForResource:@"Strings-en/strings"
+                                                               ofType:@"xml"];
+      if (enStringsPath != nil) {
+        strings_directory_path = [[NSBundle bundleForClass:self] resourcePath];
+      } else {
+        // Nothing found, fall back to main bundle (will likely fail but provides debug info)
+        strings_directory_path = [[NSBundle mainBundle] resourcePath];
+      }
+    }
+  }
+
+  std::string strings_directory = [strings_directory_path gtx_stdString];
   std::vector<gtx::Locale> locales(gtx::kDefaultLocales.begin(), gtx::kDefaultLocales.end());
   return gtx::LocalizedStringsManager::LocalizedStringsManagerWithLocalesInDirectory(
       locales, strings_directory);

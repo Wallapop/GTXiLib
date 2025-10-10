@@ -18,8 +18,8 @@
 
 #include <string>
 
-#include <abseil/absl/strings/str_cat.h>
-#include <abseil/absl/types/optional.h>
+#include "absl/strings/str_cat.h"
+#include "absl/types/optional.h"
 #include "accessibility_hierarchy_searching.h"
 #include "typedefs.h"
 

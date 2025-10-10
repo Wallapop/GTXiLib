@@ -18,7 +18,7 @@
 
 #import <XCTest/XCTest.h>
 
-#include <abseil/absl/strings/str_cat.h>
+#include "absl/strings/str_cat.h"
 #import "GTXLocalizedStringsManagerUtils.h"
 #include "metadata_map.h"
 #include "localized_strings_manager.h"

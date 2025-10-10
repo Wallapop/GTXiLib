@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "metadata_map.h"
 #include "typedefs.h"
 #include "error_message.h"

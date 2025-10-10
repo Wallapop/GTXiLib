@@ -19,7 +19,7 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 
 /**
  * A key used to enter values into a MetadataMap.
@@ -34,10 +34,10 @@ static const CGFloat kGTXTestAccuracy = 0.001f;
 // Constants used in tests.
 static const bool kGTXTestBool = true;
 static const gtx::MetadataMap::byte kGTXTestByte = 2;
-static const int16 kGTXTestShort = 257;
+static const int16_t kGTXTestShort = 257;
 static const char kGTXTestChar = 'A';
 static const int kGTXTestInt = 65536;
-static const int64 kGTXTestLong = 4294967296;
+static const int64_t kGTXTestLong = 4294967296;
 static const float kGTXTestFloat = 2.0f;
 static const double kGTXTestDouble = 3.0;
 static const std::string kGTXTestString = "test";

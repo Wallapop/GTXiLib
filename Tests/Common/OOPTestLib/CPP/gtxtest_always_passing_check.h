@@ -17,7 +17,7 @@
 #ifndef THIRD_PARTY_OBJECTIVE_C_GTXILIB_TESTS_COMMON_OOPTESTLIB_CPP_GTXTEST_ALWAYS_PASSING_CHECK_H_
 #define THIRD_PARTY_OBJECTIVE_C_GTXILIB_TESTS_COMMON_OOPTESTLIB_CPP_GTXTEST_ALWAYS_PASSING_CHECK_H_
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "check.h"
 #include "error_message.h"
 #include "gtx_types.h"

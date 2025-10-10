@@ -20,7 +20,7 @@
 #include <memory>
 #include <vector>
 
-#include <abseil/absl/strings/string_view.h>
+#include "absl/strings/string_view.h"
 #include "check.h"
 
 namespace gtx {

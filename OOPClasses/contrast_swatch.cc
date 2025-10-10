@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "gtx_types.h"
 
 namespace gtx {

@@ -23,7 +23,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "typedefs.h"
 
 namespace gtx {

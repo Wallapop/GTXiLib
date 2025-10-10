@@ -20,7 +20,7 @@
 #include <memory>
 #include <string>
 
-#include <abseil/absl/container/flat_hash_map.h>
+#include "absl/container/flat_hash_map.h"
 #include "gtx_types.h"
 #include "locales.h"
 #include "localized_string_ids.h"

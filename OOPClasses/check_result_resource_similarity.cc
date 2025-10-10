@@ -19,7 +19,7 @@
 #include <functional>
 #include <string>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "accessibility_hierarchy_searching.h"
 #include "typedefs.h"
 #include "check_result_in_hierarchy.h"

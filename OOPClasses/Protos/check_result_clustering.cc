@@ -18,7 +18,7 @@
 
 #include <vector>
 
-#include <abseil/absl/types/span.h>
+#include "absl/types/span.h"
 #include "typedefs.h"
 #include "check_result_in_hierarchy.h"
 #include "check_result_similarity.h"

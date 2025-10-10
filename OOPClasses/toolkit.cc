@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-#include <abseil/absl/types/optional.h>
+#include "absl/types/optional.h"
 #include "typedefs.h"
 #include "accessibility_label_not_punctuated_check.h"
 #include "check.h"

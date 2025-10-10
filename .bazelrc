@@ -1,0 +1,4 @@
+common --ios_simulator_device="iPhone 15"
+
+# C++ standard for all C++ compilations (including Objective-C++)
+build --cxxopt=-std=c++20

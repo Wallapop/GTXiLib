@@ -18,8 +18,8 @@
 
 #include <string>
 
-#include <abseil/absl/strings/substitute.h>
-#include <abseil/absl/types/optional.h>
+#include "absl/strings/substitute.h"
+#include "absl/types/optional.h"
 #include "gtx.pb.h"
 #include "metadata_map.h"
 #include "proto_utils.h"

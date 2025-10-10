@@ -104,7 +104,7 @@
 - (void)registerOOPCheck:(std::unique_ptr<gtx::Check> &)check {
   NSString *name = [NSString gtx_stringFromSTDString:check->name()];
   _outOfProcessToolkit->RegisterCheck(check);
-  __weak typeof(self) weakSelf = self;
+  __weak __typeof__(self) weakSelf = self;
   id<GTXChecking> wrappedCheck = [GTXToolKit
       checkWithName:name
               block:^BOOL(id _Nonnull element, GTXErrorRefType errorOrNil) {
