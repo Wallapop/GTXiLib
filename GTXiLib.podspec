@@ -17,7 +17,8 @@ Pod::Spec.new do |s|
   s.public_header_files = "Classes/**/*.h"
   s.private_header_files = "Classes/ObjCPP/*.h", "Classes/XCTest/*.h", "OOPClasses/**/*.h"
   s.resources = ["ios_translations.bundle"]
-  s.ios.frameworks = ["Vision", "XCTest"]
+  s.ios.frameworks = ["Vision"]
+  s.ios.weak_frameworks = ["XCTest"]
   s.libraries = "c++"
   s.dependency "abseil"
   s.dependency "tinyxml"
