@@ -85,7 +85,8 @@ public func verifyAccessibility(
     style: GTXAggregateStyle = .compact,
     record snapshotPath: String? = nil,
     showPassingSummary: Bool = true,
-    saveScreenshot: Bool = false
+    saveScreenshot: Bool = false,
+    screenshotPath: String? = nil
 ) -> String? {
     let result = toolkit.resultFromCheckingAllElements(fromRootElements: [view])
 
@@ -126,10 +127,18 @@ public func verifyAccessibility(
         if saveScreenshot {
             let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
             if let screenshot = createScreenshotWithOverlays(view: view, failingElements: failingElements) {
-                let screenshotPath = snapshotPath.replacingOccurrences(of: ".yml", with: "_screenshot.png")
+                // Use custom screenshot path if provided, otherwise derive from YAML path
+                let finalScreenshotPath = screenshotPath ?? snapshotPath.replacingOccurrences(of: ".yml", with: "_screenshot.png")
+
+                // Ensure parent directory exists
+                let parentDir = (finalScreenshotPath as NSString).deletingLastPathComponent
+                if !FileManager.default.fileExists(atPath: parentDir) {
+                    try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+                }
+
                 if let imageData = screenshot.pngData() {
-                    try? imageData.write(to: URL(fileURLWithPath: screenshotPath))
-                    print("📸 GTX screenshot with numbered overlays saved to: \(screenshotPath)")
+                    try? imageData.write(to: URL(fileURLWithPath: finalScreenshotPath))
+                    print("📸 GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)")
                 }
             }
         }
@@ -982,9 +991,5 @@ private func saveGTXResultAsYAML(_ result: GTXFormattedResultWithText, to path: 
 // MARK: - Test Helper
 
 private func fail(_ message: String, file: String, line: UInt) {
-    #if canImport(XCTest)
-    XCTFail(message, file: StaticString(stringLiteral: file), line: line)
-    #else
     assertionFailure(message)
-    #endif
 }

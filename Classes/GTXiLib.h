@@ -20,10 +20,11 @@
 #import <UIKit/UIKit.h>
 
 //! Project version number for GTXiLib.
-FOUNDATION_EXPORT double gGTXiLibVersionNumber;
+// Commented out to avoid duplicate symbols when building as framework (CocoaPods generates these automatically)
+// FOUNDATION_EXPORT double gGTXiLibVersionNumber;
 
 //! Project version string for GTXiLib.
-FOUNDATION_EXPORT const unsigned char GTXiLibVersionString[];
+// FOUNDATION_EXPORT const unsigned char GTXiLibVersionString[];
 
 #import "GTXAccessibilityTree.h"
 #import "GTXAnalytics.h"
