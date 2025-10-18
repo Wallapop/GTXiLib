@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+#if __has_include("XCTest/XCTest.h")
 #import <XCTest/XCTest.h>
 
 #include "gtx.pb.h"
@@ -42,7 +43,10 @@
  * @param elementType The @c XCUIElementType to convert.
  * @return A @c gtx::ElementType::ElementTypeEnum value corresponding to @c elementType.
  */
+
 + (gtx::ElementType::ElementTypeEnum)gtxtest_elementTypeFromXCUIElementType:
     (XCUIElementType)elementType;
 
 @end
+#endif
+
