@@ -109,7 +109,10 @@ public func verifyAccessibility(
 
     let rawError = result.aggregatedError().localizedDescription
 
-    // Build a map of element addresses to their full text (first 50 chars)
+    // Build deterministic element ordering for consistent numbering
+    let elementOrdering = buildElementOrdering(from: view)
+
+    // Build a map of element addresses to their full text
     let elementTextMap = buildElementTextMap(from: view)
 
     let formattedResult = formatGTXResultWithMetadata(
@@ -117,28 +120,33 @@ public func verifyAccessibility(
         style: style,
         elementsScanned: result.elementsScanned,
         showPassingSummary: showPassingSummary,
-        elementTextMap: elementTextMap
+        elementTextMap: elementTextMap,
+        elementOrdering: elementOrdering
     )
 
     if let snapshotPath = snapshotPath {
         saveGTXResultAsYAML(formattedResult, to: snapshotPath)
 
-        // Save numbered screenshot if requested
+        // Smart screenshot regeneration: save if requested OR if screenshot is missing
         if saveScreenshot {
-            let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
-            if let screenshot = createScreenshotWithOverlays(view: view, failingElements: failingElements) {
-                // Use custom screenshot path if provided, otherwise derive from YAML path
-                let finalScreenshotPath = screenshotPath ?? snapshotPath.replacingOccurrences(of: ".yml", with: "_screenshot.png")
+            let finalScreenshotPath = screenshotPath ?? snapshotPath.replacingOccurrences(of: ".yml", with: "_screenshot.png")
+            let screenshotMissing = !FileManager.default.fileExists(atPath: finalScreenshotPath)
 
-                // Ensure parent directory exists
-                let parentDir = (finalScreenshotPath as NSString).deletingLastPathComponent
-                if !FileManager.default.fileExists(atPath: parentDir) {
-                    try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
-                }
+            // Generate screenshot if explicitly requested or if it's missing
+            if saveScreenshot || screenshotMissing {
+                let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
+                if let screenshot = createScreenshotWithOverlays(view: view, failingElements: failingElements, elementOrdering: elementOrdering) {
+                    // Ensure parent directory exists
+                    let parentDir = (finalScreenshotPath as NSString).deletingLastPathComponent
+                    if !FileManager.default.fileExists(atPath: parentDir) {
+                        try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+                    }
 
-                if let imageData = screenshot.pngData() {
-                    try? imageData.write(to: URL(fileURLWithPath: finalScreenshotPath))
-                    print("📸 GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)")
+                    if let imageData = screenshot.pngData() {
+                        try? imageData.write(to: URL(fileURLWithPath: finalScreenshotPath))
+                        let regeneratedNote = screenshotMissing ? " (regenerated - was missing)" : ""
+                        print("📸 GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)\(regeneratedNote)")
+                    }
                 }
             }
         }
@@ -511,6 +519,91 @@ private func firstCapture(in text: String, pattern: String) -> String? {
 
 // MARK: - YAML Export and Screenshot Support
 
+/// Struct to hold comprehensive element metadata
+private struct ElementMetadata {
+    let address: String
+    let hierarchyID: Int
+    let viewClass: String
+    let accessibilityLabel: String?
+    let accessibilityHint: String?
+    let accessibilityIdentifier: String?
+    let accessibilityTraits: UIAccessibilityTraits
+    let frame: CGRect
+
+    // Type-specific properties
+    let buttonTitle: String?
+    let buttonImage: String?
+    let labelText: String?
+}
+
+/// Build deterministic element ordering based on DFS traversal of view hierarchy
+/// This ensures consistent numbering between YAML and screenshot overlays
+private func buildElementOrdering(from rootView: UIView) -> [String: Int] {
+    var ordering: [String: Int] = [:]
+    var counter = 1
+
+    func traverse(_ view: UIView) {
+        let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
+        ordering[address] = counter
+        counter += 1
+
+        // Deterministic order: iterate subviews in array order
+        for subview in view.subviews {
+            traverse(subview)
+        }
+    }
+
+    traverse(rootView)
+    return ordering
+}
+
+/// Build comprehensive element metadata map including accessibility properties and type-specific info
+private func buildElementMetadataMap(from rootView: UIView, ordering: [String: Int]) -> [String: ElementMetadata] {
+    var metadataMap: [String: ElementMetadata] = [:]
+
+    func traverse(_ view: UIView) {
+        let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
+        let hierarchyID = ordering[address] ?? 0
+
+        // Extract button-specific properties
+        var buttonTitle: String?
+        var buttonImage: String?
+        if let button = view as? UIButton {
+            buttonTitle = button.title(for: .normal) ?? button.attributedTitle(for: .normal)?.string
+            buttonImage = button.image(for: .normal)?.accessibilityIdentifier ?? button.currentImage?.accessibilityIdentifier
+        }
+
+        // Extract label text
+        var labelText: String?
+        if let label = view as? UILabel {
+            labelText = label.text
+        }
+
+        let metadata = ElementMetadata(
+            address: address,
+            hierarchyID: hierarchyID,
+            viewClass: String(describing: type(of: view)),
+            accessibilityLabel: view.accessibilityLabel,
+            accessibilityHint: view.accessibilityHint,
+            accessibilityIdentifier: view.accessibilityIdentifier,
+            accessibilityTraits: view.accessibilityTraits,
+            frame: view.frame,
+            buttonTitle: buttonTitle,
+            buttonImage: buttonImage,
+            labelText: labelText
+        )
+
+        metadataMap[address] = metadata
+
+        for subview in view.subviews {
+            traverse(subview)
+        }
+    }
+
+    traverse(rootView)
+    return metadataMap
+}
+
 private func buildElementTextMap(from rootView: UIView) -> [String: String] {
     var textMap: [String: String] = [:]
 
@@ -518,14 +611,12 @@ private func buildElementTextMap(from rootView: UIView) -> [String: String] {
         let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
 
         if let label = view as? UILabel, let text = label.text, !text.isEmpty {
-            let truncated = String(text.prefix(50))
-            textMap[address] = truncated
+            // Capture full text, not truncated
+            textMap[address] = text
         } else if let button = view as? UIButton, let title = button.title(for: .normal), !title.isEmpty {
-            let truncated = String(title.prefix(50))
-            textMap[address] = truncated
+            textMap[address] = title
         } else if let button = view as? UIButton, let attributedTitle = button.attributedTitle(for: .normal), !attributedTitle.string.isEmpty {
-            let truncated = String(attributedTitle.string.prefix(50))
-            textMap[address] = truncated
+            textMap[address] = attributedTitle.string
         }
 
         for subview in view.subviews {
@@ -567,7 +658,7 @@ private func extractFailingElements(from rootView: UIView, using textMap: [Strin
     return failingElements
 }
 
-private func createScreenshotWithOverlays(view: UIView, failingElements: [Any]) -> UIImage? {
+private func createScreenshotWithOverlays(view: UIView, failingElements: [Any], elementOrdering: [String: Int]) -> UIImage? {
     // Ensure the view has been laid out
     view.layoutIfNeeded()
 
@@ -588,9 +679,16 @@ private func createScreenshotWithOverlays(view: UIView, failingElements: [Any]) 
     // Render the view hierarchy into the context
     view.layer.render(in: context)
 
-    // Draw numbered overlays for each failing element
-    for (index, element) in failingElements.enumerated() {
+    // Draw numbered overlays for each failing element using deterministic ordering
+    for element in failingElements {
         guard let failingView = element as? UIView else { continue }
+
+        // Get deterministic ID from element ordering
+        let address = String(format: "%p", unsafeBitCast(failingView, to: Int.self))
+        guard let hierarchyID = elementOrdering[address] else {
+            print("⚠️ Element not found in ordering map: \(failingView)")
+            continue
+        }
 
         // Convert the failing view's frame to the root view's coordinate system
         let rect = failingView.convert(failingView.bounds, to: view)
@@ -600,8 +698,8 @@ private func createScreenshotWithOverlays(view: UIView, failingElements: [Any]) 
         context.setLineWidth(3.0)
         context.stroke(rect)
 
-        // Draw number label
-        let numberLabel = "\(index + 1)"
+        // Draw number label using hierarchy ID (not array index)
+        let numberLabel = "\(hierarchyID)"
         let fontSize: CGFloat = 16
         let font = UIFont.boldSystemFont(ofSize: fontSize)
 
@@ -612,13 +710,13 @@ private func createScreenshotWithOverlays(view: UIView, failingElements: [Any]) 
         ]
         let textSize = (numberLabel as NSString).size(withAttributes: textAttributes)
 
-        // Position the number - alternate between corners
+        // Position the number - alternate between corners based on hierarchy ID
         let padding: CGFloat = 4
         let labelWidth = textSize.width + padding * 2
         let labelHeight = textSize.height + padding * 2
 
         // Alternate positions: top-left, top-right only (simpler pattern to avoid overlap)
-        let position = index % 2
+        let position = hierarchyID % 2
         let labelX: CGFloat
         let labelY: CGFloat
 
@@ -652,6 +750,7 @@ private func createScreenshotWithOverlays(view: UIView, failingElements: [Any]) 
 }
 
 private struct GTXElementWithText {
+    let id: Int  // Deterministic hierarchy ID
     let view: String
     let baseClass: String?
     let frameRect: String?
@@ -668,15 +767,16 @@ private struct GTXFormattedResultWithText {
     let hasFailures: Bool
     let elementsScanned: Int
     let passingElements: Int
-    let elements: [(view: String, baseClass: String?, frameRect: String?,
+    let elements: [(id: Int, view: String, baseClass: String?, frameRect: String?,
                    elementSize: String?, accessibilityFrame: String?, text: String?,
                    checks: [(name: String, passed: Bool, reason: String?)])]
 }
 
 private func formatGTXResultWithMetadata(fromString raw: String, style: GTXAggregateStyle,
                                         elementsScanned: Int = 0, showPassingSummary: Bool = false,
-                                        elementTextMap: [String: String] = [:]) -> GTXFormattedResultWithText {
-    let elements = parseGTXElementsWithText(from: raw, elementTextMap: elementTextMap)
+                                        elementTextMap: [String: String] = [:],
+                                        elementOrdering: [String: Int] = [:]) -> GTXFormattedResultWithText {
+    let elements = parseGTXElementsWithText(from: raw, elementTextMap: elementTextMap, elementOrdering: elementOrdering)
 
     guard !elements.isEmpty else {
         return GTXFormattedResultWithText(
@@ -721,7 +821,7 @@ private func formatGTXResultWithMetadata(fromString raw: String, style: GTXAggre
     }
 
     let publicElements = grouped.map { g in
-        (view: g.elem.view, baseClass: g.elem.baseClass, frameRect: g.elem.frameRect,
+        (id: g.elem.id, view: g.elem.view, baseClass: g.elem.baseClass, frameRect: g.elem.frameRect,
          elementSize: g.elem.elementSize, accessibilityFrame: g.elem.accessibilityFrame, text: g.elem.text,
          checks: g.checks.map { (name: $0.name, passed: $0.passed, reason: $0.reason) })
     }
@@ -740,7 +840,7 @@ private func formatGTXResultWithMetadata(fromString raw: String, style: GTXAggre
     )
 }
 
-private func parseGTXElementsWithText(from raw: String, elementTextMap: [String: String]) -> [GTXElementWithText] {
+private func parseGTXElementsWithText(from raw: String, elementTextMap: [String: String], elementOrdering: [String: Int]) -> [GTXElementWithText] {
     let normalizedLines = raw
         .replacingOccurrences(of: "\r\n", with: "\n")
         .replacingOccurrences(of: "UIExtendedSRGBColorSpace 1 1 1 1", with: "white")
@@ -762,9 +862,28 @@ private func parseGTXElementsWithText(from raw: String, elementTextMap: [String:
             finalText = fullText
         }
 
-        elements.append(GTXElementWithText(view: view, baseClass: currentBase, frameRect: currentFrameRect,
-                                   elementSize: currentElemSize, accessibilityFrame: currentA11yFrame,
-                                   text: finalText, checks: currentChecks))
+        // Get deterministic ID from element ordering (or use fallback counter)
+        let hierarchyID: Int
+        if let address = currentElementAddress, let id = elementOrdering[address] {
+            hierarchyID = id
+        } else {
+            // Fallback: use sequential numbering if address not found
+            hierarchyID = elements.count + 1
+            if let address = currentElementAddress {
+                print("⚠️ Element address \(address) not found in ordering map, using fallback ID: \(hierarchyID)")
+            }
+        }
+
+        elements.append(GTXElementWithText(
+            id: hierarchyID,
+            view: view,
+            baseClass: currentBase,
+            frameRect: currentFrameRect,
+            elementSize: currentElemSize,
+            accessibilityFrame: currentA11yFrame,
+            text: finalText,
+            checks: currentChecks
+        ))
         currentView = nil; currentBase = nil; currentFrameRect = nil
         currentElemSize = nil; currentA11yFrame = nil; currentText = nil
         currentElementAddress = nil; currentChecks = []
@@ -819,9 +938,9 @@ private func formatYAML(_ groups: [(elem: GTXElementWithText, checks: [GTXCheck]
 
     // Failing elements section
     yaml += "failingElements:\n"
-    for (index, g) in groups.enumerated() {
+    for g in groups {
         let e = g.elem
-        yaml += "  - id: \(index + 1)\n"
+        yaml += "  - id: \(e.id)\n"
         yaml += "    view: \(yamlString(e.view))\n"
         if let text = e.text, !text.isEmpty {
             yaml += "    text: \(yamlString(text))\n"
@@ -951,8 +1070,8 @@ private func saveGTXResultAsYAML(_ result: GTXFormattedResultWithText, to path: 
     // Failing elements section
     if result.hasFailures {
         yaml += "failingElements:\n"
-        for (index, element) in result.elements.enumerated() {
-            yaml += "  - id: \(index + 1)\n"
+        for element in result.elements {
+            yaml += "  - id: \(element.id)\n"
             yaml += "    view: \(yamlString(element.view))\n"
             if let text = element.text, !text.isEmpty {
                 yaml += "    text: \(yamlString(text))\n"
