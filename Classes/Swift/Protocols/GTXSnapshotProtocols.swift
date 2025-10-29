@@ -104,6 +104,6 @@ public struct DefaultGTXSnapshotDirectoryManager: GTXSnapshotDirectoryManaging {
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: "/", with: "_")
 
-        return (directory as NSString).appendingPathComponent("\(cleanModuleName)_aggregated.yaml")
+        return (directory as NSString).appendingPathComponent("\(cleanModuleName)_gtx_accessibility.yml")
     }
 }

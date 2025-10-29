@@ -112,6 +112,211 @@ public class GTXAggregator {
         return testCases[testName] != nil
     }
 
+    /// Get the current YAML content as a string
+    /// - Returns: The YAML content that would be written to disk
+    public func getCurrentYAMLContent() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var yaml = "# GTX Accessibility Report - Aggregated Results\n\n"
+
+        // Global summary
+        let summary = _globalSummaryUnsafe()
+        yaml += "globalSummary:\n"
+        yaml += "  totalTestCases: \(summary.totalTestCases)\n"
+        yaml += "  passedTestCases: \(summary.passedTestCases)\n"
+        yaml += "  failedTestCases: \(summary.failedTestCases)\n"
+        yaml += "  totalElementsScanned: \(summary.totalElementsScanned)\n"
+        yaml += "  totalFailingElements: \(summary.totalFailingElements)\n"
+        yaml += "  totalCheckFailures: \(summary.totalCheckFailures)\n\n"
+
+        // Test cases (sorted by name for stability)
+        yaml += "testCases:\n"
+        for (testName, result) in testCases.sorted(by: { $0.key < $1.key }) {
+            yaml += "  \"\(testName)\":\n"
+
+            // Summary
+            yaml += "    summary:\n"
+            yaml += "      status: \"\(result.summary.status)\"\n"
+            yaml += "      elementsScanned: \(result.summary.elementsScanned)\n"
+            yaml += "      elementsWithFailures: \(result.summary.elementsWithFailures)\n"
+            yaml += "      totalCheckFailures: \(result.summary.totalCheckFailures)\n"
+
+            // Screenshot
+            if let screenshot = result.screenshot {
+                yaml += "    screenshot: \"\(screenshot)\"\n"
+            }
+
+            // Failing elements
+            if result.summary.status == "FAILED" {
+                if !result.failingElements.isEmpty {
+                    yaml += "    failingElements:\n"
+                    for element in result.failingElements {
+                        yaml += "      - id: \(element.id)\n"
+                        yaml += "        view: \(yamlString(element.view))\n"
+                        if let text = element.text, !text.isEmpty {
+                            yaml += "        text: \(yamlString(text))\n"
+                        }
+                        if let baseClass = element.baseClass, !baseClass.isEmpty {
+                            yaml += "        baseClass: \(yamlString(baseClass))\n"
+                        }
+                        if let frameRect = element.frameRect, !frameRect.isEmpty {
+                            yaml += "        frameRect: \(yamlString(frameRect))\n"
+                        }
+                        if let elementSize = element.elementSize, !elementSize.isEmpty {
+                            yaml += "        elementSize: \(yamlString(elementSize))\n"
+                        }
+                        if let a11yFrame = element.accessibilityFrame, !a11yFrame.isEmpty {
+                            yaml += "        accessibilityFrame: \(yamlString(a11yFrame))\n"
+                        }
+                        yaml += "        checks:\n"
+                        for check in element.checks {
+                            yaml += "          - name: \(yamlString(check.name))\n"
+                            yaml += "            reason: \(yamlString(check.reason ?? ""))\n"
+                        }
+                    }
+                } else {
+                    yaml += "    failingElements: []  # Test failed but no specific elements were recorded\n"
+                }
+            }
+            yaml += "\n"
+        }
+
+        return yaml
+    }
+
+    /// Compare a specific test case with what's saved on disk
+    /// - Parameter testName: Name of the test case to compare
+    /// - Returns: tuple (matches: Bool, diff: String?) - diff is populated if content differs
+    public func compareTestCase(_ testName: String) -> (matches: Bool, diff: String?) {
+        // First check if we have the test case in memory
+        guard let currentTestCase = testCases[testName] else {
+            return (false, "Test case not found in current results")
+        }
+
+        // Try to load the saved file and parse it
+        guard FileManager.default.fileExists(atPath: outputPath) else {
+            return (false, "YAML file does not exist on disk - this is a new test")
+        }
+
+        guard let savedContent = try? String(contentsOfFile: outputPath, encoding: .utf8) else {
+            return (false, "Failed to read saved YAML file")
+        }
+
+        // Parse the saved YAML to extract the specific test case
+        let savedTestCases: [String: TestCaseResult]
+        do {
+            savedTestCases = try parseAggregatedYAML(savedContent)
+        } catch {
+            return (false, "Failed to parse saved YAML: \(error)")
+        }
+
+        // Check if this specific test case exists in the saved file
+        guard let savedTestCase = savedTestCases[testName] else {
+            return (false, "Test case '\(testName)' not found in saved YAML - this is a new test")
+        }
+
+        let currentYAML = formatTestCaseAsYAML(testName: testName, result: currentTestCase)
+        let savedYAML = formatTestCaseAsYAML(testName: testName, result: savedTestCase)
+
+        if currentYAML == savedYAML {
+            return (true, nil)
+        }
+
+        let diff = generateDiff(saved: savedYAML, current: currentYAML)
+        return (false, diff)
+    }
+
+    /// Format a single test case as YAML (for comparison)
+    private func formatTestCaseAsYAML(testName: String, result: TestCaseResult) -> String {
+        var yaml = "\"\(testName)\":\n"
+
+        // Summary
+        yaml += "  summary:\n"
+        yaml += "    status: \"\(result.summary.status)\"\n"
+        yaml += "    elementsScanned: \(result.summary.elementsScanned)\n"
+        yaml += "    elementsWithFailures: \(result.summary.elementsWithFailures)\n"
+        yaml += "    totalCheckFailures: \(result.summary.totalCheckFailures)\n"
+
+        // Screenshot
+        if let screenshot = result.screenshot {
+            yaml += "  screenshot: \"\(screenshot)\"\n"
+        }
+
+        // Failing elements
+        if result.summary.status == "FAILED" {
+            if !result.failingElements.isEmpty {
+                yaml += "  failingElements:\n"
+                for element in result.failingElements {
+                    yaml += "    - id: \(element.id)\n"
+                    yaml += "      view: \(yamlString(element.view))\n"
+                    if let text = element.text, !text.isEmpty {
+                        yaml += "      text: \(yamlString(text))\n"
+                    }
+                    if let baseClass = element.baseClass, !baseClass.isEmpty {
+                        yaml += "      baseClass: \(yamlString(baseClass))\n"
+                    }
+                    if let frameRect = element.frameRect, !frameRect.isEmpty {
+                        yaml += "      frameRect: \(yamlString(frameRect))\n"
+                    }
+                    if let elementSize = element.elementSize, !elementSize.isEmpty {
+                        yaml += "      elementSize: \(yamlString(elementSize))\n"
+                    }
+                    if let a11yFrame = element.accessibilityFrame, !a11yFrame.isEmpty {
+                        yaml += "      accessibilityFrame: \(yamlString(a11yFrame))\n"
+                    }
+                    yaml += "      checks:\n"
+                    for check in element.checks {
+                        yaml += "        - name: \(yamlString(check.name))\n"
+                        yaml += "          reason: \(yamlString(check.reason ?? ""))\n"
+                    }
+                }
+            } else {
+                yaml += "  failingElements: []  # Test failed but no specific elements were recorded\n"
+            }
+        }
+
+        return yaml
+    }
+
+    /// Generate a readable diff between two strings
+    private func generateDiff(saved: String, current: String) -> String {
+        let savedLines = saved.components(separatedBy: .newlines)
+        let currentLines = current.components(separatedBy: .newlines)
+
+        var diff = "\n" + String(repeating: "=", count: 80) + "\n"
+        diff += "YAML CONTENT DIFF\n"
+        diff += String(repeating: "=", count: 80) + "\n\n"
+
+        // Simple line-by-line comparison
+        let maxLines = max(savedLines.count, currentLines.count)
+        var differenceCount = 0
+
+        for i in 0..<maxLines {
+            let savedLine = i < savedLines.count ? savedLines[i] : "<missing>"
+            let currentLine = i < currentLines.count ? currentLines[i] : "<missing>"
+
+            if savedLine != currentLine {
+                differenceCount += 1
+                if differenceCount <= 20 { // Show first 20 differences
+                    diff += "Line \(i + 1):\n"
+                    diff += "  - SAVED:   \(savedLine)\n"
+                    diff += "  + CURRENT: \(currentLine)\n\n"
+                }
+            }
+        }
+
+        if differenceCount > 20 {
+            diff += "... and \(differenceCount - 20) more differences\n\n"
+        }
+
+        diff += String(repeating: "=", count: 80) + "\n"
+        diff += "Total differences: \(differenceCount) lines\n"
+        diff += String(repeating: "=", count: 80) + "\n"
+
+        return diff
+    }
+
     /// Add or update a test result in the aggregated report
     /// - Parameters:
     ///   - testName: Name of the test case
@@ -131,26 +336,12 @@ public class GTXAggregator {
             totalCheckFailures: result.totalCheckFailures
         )
 
-        // Convert elements to FailingElement format
-        let failingElements = result.elements.map { element in
-            // Extract ID and text if available
-            let elementID: Int
-            let elementText: String?
-
-            // Check if this is the enhanced tuple with id field
-            if let tupleWithID = element as? (id: Int, view: String, baseClass: String?, frameRect: String?, elementSize: String?, accessibilityFrame: String?, text: String?, checks: [(name: String, passed: Bool, reason: String?)]) {
-                elementID = tupleWithID.id
-                elementText = tupleWithID.text
-            } else {
-                // Fallback for standard tuple without ID
-                elementID = 0
-                elementText = nil
-            }
-
-            return FailingElement(
-                id: elementID,
+        // Convert GTXElementResult to FailingElement format
+        let failingElements: [FailingElement] = result.elements.map { element in
+            FailingElement(
+                id: element.id,
                 view: element.view,
-                text: elementText,
+                text: element.text,
                 baseClass: element.baseClass,
                 frameRect: element.frameRect,
                 elementSize: element.elementSize,
@@ -206,8 +397,7 @@ public class GTXAggregator {
         lock.lock()
         defer { lock.unlock() }
 
-        var yaml = "# GTX Accessibility Report - Aggregated Results\n"
-        yaml += "# Generated: \(Date())\n\n"
+        var yaml = "# GTX Accessibility Report - Aggregated Results\n\n"
 
         // Global summary
         let summary = _globalSummaryUnsafe()
@@ -347,6 +537,12 @@ public class GTXAggregator {
         var inElement = false
         var inChecks = false
 
+        // Summary field accumulators
+        var summaryStatus: String?
+        var summaryElementsScanned: Int?
+        var summaryElementsWithFailures: Int?
+        var summaryTotalCheckFailures: Int?
+
         func flush() {
             guard let testName = currentTestCase, let summary = currentSummary else { return }
 
@@ -382,6 +578,11 @@ public class GTXAggregator {
             inFailingElements = false
             inElement = false
             inChecks = false
+            // Reset summary accumulators
+            summaryStatus = nil
+            summaryElementsScanned = nil
+            summaryElementsWithFailures = nil
+            summaryTotalCheckFailures = nil
         }
 
         for (lineNum, line) in lines.enumerated() {
@@ -408,37 +609,39 @@ public class GTXAggregator {
             if trimmed.hasPrefix("summary:") {
                 inSummary = true
                 inFailingElements = false
+                // Reset summary field accumulators
+                summaryStatus = nil
+                summaryElementsScanned = nil
+                summaryElementsWithFailures = nil
+                summaryTotalCheckFailures = nil
                 continue
             }
 
-            // Parse summary fields
+            // Parse summary fields as we encounter them
             if inSummary, let colonIndex = trimmed.firstIndex(of: ":") {
                 let key = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
-                let value = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                let rawValue = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                let value = unescapeYAMLString(rawValue)
 
-                if key == "status" {
-                    // We'll build the summary after collecting all fields
-                } else if key == "elementsScanned" {
-                    // Collected below
-                } else if key == "elementsWithFailures" {
-                    // Collected below
-                } else if key == "totalCheckFailures" {
-                    // After this field, construct the summary
-                    if let testName = currentTestCase {
-                        // Extract all summary values
-                        let status = extractSummaryField(from: lines, startLine: lineNum, field: "status", context: testName) ?? "UNKNOWN"
-                        let elementsScanned = Int(extractSummaryField(from: lines, startLine: lineNum - 3, field: "elementsScanned", context: testName) ?? "0") ?? 0
-                        let elementsWithFailures = Int(extractSummaryField(from: lines, startLine: lineNum - 2, field: "elementsWithFailures", context: testName) ?? "0") ?? 0
-                        let totalCheckFailures = Int(value) ?? 0
-
-                        currentSummary = TestCaseSummary(
-                            status: status,
-                            elementsScanned: elementsScanned,
-                            elementsWithFailures: elementsWithFailures,
-                            totalCheckFailures: totalCheckFailures
-                        )
-                        inSummary = false
-                    }
+                switch key {
+                case "status":
+                    summaryStatus = value
+                case "elementsScanned":
+                    summaryElementsScanned = Int(value)
+                case "elementsWithFailures":
+                    summaryElementsWithFailures = Int(value)
+                case "totalCheckFailures":
+                    summaryTotalCheckFailures = Int(value)
+                    // After totalCheckFailures, construct the summary
+                    currentSummary = TestCaseSummary(
+                        status: summaryStatus ?? "UNKNOWN",
+                        elementsScanned: summaryElementsScanned ?? 0,
+                        elementsWithFailures: summaryElementsWithFailures ?? 0,
+                        totalCheckFailures: summaryTotalCheckFailures ?? 0
+                    )
+                    inSummary = false
+                default:
+                    break
                 }
                 continue
             }
@@ -446,8 +649,8 @@ public class GTXAggregator {
             // Screenshot field
             if trimmed.hasPrefix("screenshot:") {
                 if let colonIndex = trimmed.firstIndex(of: ":") {
-                    let value = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                    currentScreenshot = value
+                    let rawValue = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                    currentScreenshot = unescapeYAMLString(rawValue)
                 }
                 continue
             }
@@ -490,7 +693,8 @@ public class GTXAggregator {
             // Parse element fields
             if inElement && !inChecks, let colonIndex = trimmed.firstIndex(of: ":") {
                 let key = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
-                let value = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                let rawValue = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                let value = unescapeYAMLString(rawValue)
 
                 guard var elem = currentElement else { continue }
 
@@ -520,7 +724,8 @@ public class GTXAggregator {
 
             // Parse checks
             if inChecks && trimmed.hasPrefix("- name:") {
-                if let nameValue = trimmed.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) {
+                if let rawValue = trimmed.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) {
+                    let nameValue = unescapeYAMLString(rawValue)
                     currentChecks.append((name: nameValue, reason: nil))
                 }
                 continue
@@ -528,7 +733,8 @@ public class GTXAggregator {
 
             if inChecks && trimmed.hasPrefix("reason:") {
                 if var lastCheck = currentChecks.last {
-                    if let reasonValue = trimmed.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) {
+                    if let rawValue = trimmed.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) {
+                        let reasonValue = unescapeYAMLString(rawValue)
                         currentChecks[currentChecks.count - 1] = (name: lastCheck.name, reason: reasonValue)
                     }
                 }
@@ -560,12 +766,19 @@ public class GTXAggregator {
         if value.isEmpty {
             return "\"\""
         }
-        // Escape if contains special characters
         if value.contains("\"") || value.contains("\n") || value.contains(":") || value.contains("#") {
             let escaped = value.replacingOccurrences(of: "\"", with: "\\\"")
             return "\"\(escaped)\""
         }
         return "\"\(value)\""
+    }
+
+    /// Unescape a YAML string value (reverse of yamlString)
+    private func unescapeYAMLString(_ value: String) -> String {
+        var unescaped = value.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        unescaped = unescaped.replacingOccurrences(of: "\\\"", with: "\"")
+        unescaped = unescaped.replacingOccurrences(of: "\\n", with: "\n")
+        return unescaped
     }
 }
 
