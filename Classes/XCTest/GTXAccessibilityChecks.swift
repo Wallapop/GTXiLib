@@ -24,6 +24,45 @@ import XCTest
 
 // MARK: - Models
 
+/// Represents a single accessibility check result
+public struct GTXCheckResult {
+    public let name: String
+    public let passed: Bool
+    public let reason: String?
+
+    public init(name: String, passed: Bool, reason: String?) {
+        self.name = name
+        self.passed = passed
+        self.reason = reason
+    }
+}
+
+/// Represents a UI element with its accessibility check results
+public struct GTXElementResult {
+    public let id: Int
+    public let view: String
+    public let text: String?
+    public let baseClass: String?
+    public let frameRect: String?
+    public let elementSize: String?
+    public let accessibilityFrame: String?
+    public let checks: [GTXCheckResult]
+
+    public init(id: Int, view: String, text: String?, baseClass: String?,
+                frameRect: String?, elementSize: String?, accessibilityFrame: String?,
+                checks: [GTXCheckResult]) {
+        self.id = id
+        self.view = view
+        self.text = text
+        self.baseClass = baseClass
+        self.frameRect = frameRect
+        self.elementSize = elementSize
+        self.accessibilityFrame = accessibilityFrame
+        self.checks = checks
+    }
+}
+
+// Legacy private types for backward compatibility
 private struct GTXCheck {
     let name: String
     let passed: Bool
@@ -57,10 +96,19 @@ public struct GTXFormattedResult {
     public let formattedMessage: String
     public let hasFailures: Bool
 
-    /// Raw parsed elements (for advanced use cases)
-    public let elements: [(view: String, baseClass: String?, frameRect: String?,
-                          elementSize: String?, accessibilityFrame: String?,
-                          checks: [(name: String, passed: Bool, reason: String?)])]
+    /// Parsed elements with their accessibility check results
+    public let elements: [GTXElementResult]
+
+    public init(elementCount: Int, totalCheckFailures: Int, totalChecksPassed: Int,
+                formattedMessage: String, hasFailures: Bool,
+                elements: [GTXElementResult]) {
+        self.elementCount = elementCount
+        self.totalCheckFailures = totalCheckFailures
+        self.totalChecksPassed = totalChecksPassed
+        self.formattedMessage = formattedMessage
+        self.hasFailures = hasFailures
+        self.elements = elements
+    }
 }
 
 /// Verify accessibility and optionally save a YAML report with numbered screenshot.
@@ -241,25 +289,27 @@ public func formatGTXResult(fromString raw: String,
         message = formatCompact(grouped, totalChecks: pairs.count)
     }
 
-    // Convert to public element format
-    let publicElements = grouped.map { g in
-        (
+    // Convert to GTXElementResult format
+    let elementResults = grouped.map { g in
+        GTXElementResult(
+            id: 0,
             view: g.elem.view,
+            text: nil,
             baseClass: g.elem.baseClass,
             frameRect: g.elem.frameRect,
             elementSize: g.elem.elementSize,
             accessibilityFrame: g.elem.accessibilityFrame,
-            checks: g.checks.map { (name: $0.name, passed: $0.passed, reason: $0.reason) }
+            checks: g.checks.map { GTXCheckResult(name: $0.name, passed: $0.passed, reason: $0.reason) }
         )
     }
 
     return GTXFormattedResult(
         elementCount: grouped.count,
         totalCheckFailures: pairs.count,
-        totalChecksPassed: 0,  // Only failures in error string parsing
+        totalChecksPassed: 0,
         formattedMessage: message,
         hasFailures: true,
-        elements: publicElements
+        elements: elementResults
     )
 }
 
@@ -538,7 +588,7 @@ private struct ElementMetadata {
 
 /// Build deterministic element ordering based on DFS traversal of view hierarchy
 /// This ensures consistent numbering between YAML and screenshot overlays
-private func buildElementOrdering(from rootView: UIView) -> [String: Int] {
+internal func buildElementOrdering(from rootView: UIView) -> [String: Int] {
     var ordering: [String: Int] = [:]
     var counter = 1
 
@@ -604,7 +654,7 @@ private func buildElementMetadataMap(from rootView: UIView, ordering: [String: I
     return metadataMap
 }
 
-private func buildElementTextMap(from rootView: UIView) -> [String: String] {
+internal func buildElementTextMap(from rootView: UIView) -> [String: String] {
     var textMap: [String: String] = [:]
 
     func traverse(_ view: UIView) {
@@ -628,7 +678,7 @@ private func buildElementTextMap(from rootView: UIView) -> [String: String] {
     return textMap
 }
 
-private func extractFailingElements(from rootView: UIView, using textMap: [String: String], result: GTXResult) -> [Any] {
+internal func extractFailingElements(from rootView: UIView, using textMap: [String: String], result: GTXResult) -> [Any] {
     var failingElements: [Any] = []
     var elementAddresses: [String] = []
 
@@ -658,7 +708,7 @@ private func extractFailingElements(from rootView: UIView, using textMap: [Strin
     return failingElements
 }
 
-private func createScreenshotWithOverlays(view: UIView, failingElements: [Any], elementOrdering: [String: Int]) -> UIImage? {
+internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any], elementOrdering: [String: Int]) -> UIImage? {
     // Ensure the view has been laid out
     view.layoutIfNeeded()
 
@@ -1022,9 +1072,12 @@ private func yamlString(_ value: String) -> String {
     if value.isEmpty {
         return "\"\""
     }
-    // Escape if contains special characters
     if value.contains("\"") || value.contains("\n") || value.contains(":") || value.contains("#") {
-        let escaped = value.replacingOccurrences(of: "\"", with: "\\\"")
+        var escaped = value
+        escaped = escaped.replacingOccurrences(of: "\\", with: "\\\\")
+        escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
+        escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
+        escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
         return "\"\(escaped)\""
     }
     return "\"\(value)\""
@@ -1105,6 +1158,64 @@ private func saveGTXResultAsYAML(_ result: GTXFormattedResultWithText, to path: 
     } catch {
         print("⚠️ Failed to save GTX report to \(finalPath): \(error)")
     }
+}
+
+// MARK: - Aggregation Helper
+
+/// Format GTX result with metadata for use with GTXAggregator
+/// Returns GTXFormattedResult with properly typed GTXElementResult structs
+internal func formatGTXResultWithMetadataForAggregation(
+    fromString raw: String,
+    elementsScanned: Int = 0,
+    elementTextMap: [String: String] = [:],
+    elementOrdering: [String: Int] = [:]
+) -> GTXFormattedResult {
+    let elements = parseGTXElementsWithText(from: raw, elementTextMap: elementTextMap, elementOrdering: elementOrdering)
+
+    guard !elements.isEmpty else {
+        return GTXFormattedResult(
+            elementCount: 0,
+            totalCheckFailures: 0,
+            totalChecksPassed: elementsScanned,
+            formattedMessage: "No GTX failures",
+            hasFailures: false,
+            elements: []
+        )
+    }
+
+    let totalCheckFailures = elements.reduce(0) { $0 + $1.checks.count }
+
+    // Convert GTXElementWithText to GTXElementResult structs
+    let elementResults: [GTXElementResult] = elements.map { element in
+        GTXElementResult(
+            id: element.id,
+            view: element.view,
+            text: element.text,
+            baseClass: element.baseClass,
+            frameRect: element.frameRect,
+            elementSize: element.elementSize,
+            accessibilityFrame: element.accessibilityFrame,
+            checks: element.checks.map { check in
+                GTXCheckResult(name: check.name, passed: check.passed, reason: check.reason)
+            }
+        )
+    }
+
+    let message = formatCompactWithText(elements.map { ($0, $0.checks) }, totalChecks: totalCheckFailures)
+
+    // Calculate totalChecksPassed: total elements scanned minus failing elements
+    // The aggregator uses: elementsScanned = elementCount + totalChecksPassed
+    // So: totalChecksPassed = elementsScanned - elementCount (NOT totalCheckFailures!)
+    let totalChecksPassed = elementsScanned - elements.count
+
+    return GTXFormattedResult(
+        elementCount: elements.count,
+        totalCheckFailures: totalCheckFailures,
+        totalChecksPassed: totalChecksPassed,
+        formattedMessage: message,
+        hasFailures: true,
+        elements: elementResults
+    )
 }
 
 // MARK: - Test Helper
