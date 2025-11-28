@@ -65,14 +65,17 @@ public extension GTXToolKit {
         view.layoutIfNeeded()
 
         // Disable verbose GTX logging (those [GTX_LOG Error] messages)
-        GTXLogger.default()
+        GTXLogger.default().setLogLevel(.warning)
 
         // Perform GTX accessibility validation
         let result = self.resultFromCheckingAllElements(fromRootElements: [view])
 
         // Build element ordering for consistent IDs
-        let elementOrdering = buildElementOrdering(from: view)
-        let elementTextMap = buildElementTextMap(from: view)
+        let (elementOrdering, elementTextMap, addressMap) = buildElementOrderingAndTextMap(from: view)
+        let failingOrdering = buildFailingOrdering(result: result,
+                                                   elementOrdering: elementOrdering,
+                                                   addressMap: addressMap)
+        let orderingForOutput = failingOrdering.isEmpty ? elementOrdering : failingOrdering
 
         // Format the result with metadata
         let formattedResult: GTXFormattedResult
@@ -91,14 +94,17 @@ public extension GTXToolKit {
                 fromString: rawError,
                 elementsScanned: result.elementsScanned,
                 elementTextMap: elementTextMap,
-                elementOrdering: elementOrdering
+                elementOrdering: orderingForOutput,
+                addressMap: addressMap
             )
         }
 
         // Generate screenshot if there are failures
         if formattedResult.hasFailures {
             let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
-            if let screenshot = createScreenshotWithOverlays(view: view, failingElements: failingElements, elementOrdering: elementOrdering) {
+            if let screenshot = createScreenshotWithOverlays(view: view,
+                                                             failingElements: failingElements,
+                                                             elementOrdering: orderingForOutput) {
                 let parentDir = (screenshotPath as NSString).deletingLastPathComponent
                 if !FileManager.default.fileExists(atPath: parentDir) {
                     try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)

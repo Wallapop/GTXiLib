@@ -158,10 +158,9 @@ public func verifyAccessibility(
     let rawError = result.aggregatedError().localizedDescription
 
     // Build deterministic element ordering for consistent numbering
-    let elementOrdering = buildElementOrdering(from: view)
-
-    // Build a map of element addresses to their full text
-    let elementTextMap = buildElementTextMap(from: view)
+    let (elementOrdering, elementTextMap, addressMap) = buildElementOrderingAndTextMap(from: view)
+    let failingOrdering = buildFailingOrdering(result: result, elementOrdering: elementOrdering, addressMap: addressMap)
+    let orderingForOutput = failingOrdering.isEmpty ? elementOrdering : failingOrdering
 
     let formattedResult = formatGTXResultWithMetadata(
         fromString: rawError,
@@ -169,7 +168,8 @@ public func verifyAccessibility(
         elementsScanned: result.elementsScanned,
         showPassingSummary: showPassingSummary,
         elementTextMap: elementTextMap,
-        elementOrdering: elementOrdering
+        elementOrdering: orderingForOutput,
+        addressMap: addressMap
     )
 
     if let snapshotPath = snapshotPath {
@@ -183,7 +183,9 @@ public func verifyAccessibility(
             // Generate screenshot if explicitly requested or if it's missing
             if saveScreenshot || screenshotMissing {
                 let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
-                if let screenshot = createScreenshotWithOverlays(view: view, failingElements: failingElements, elementOrdering: elementOrdering) {
+                if let screenshot = createScreenshotWithOverlays(view: view,
+                                                                failingElements: failingElements,
+                                                                elementOrdering: orderingForOutput) {
                     // Ensure parent directory exists
                     let parentDir = (finalScreenshotPath as NSString).deletingLastPathComponent
                     if !FileManager.default.fileExists(atPath: parentDir) {
@@ -586,25 +588,56 @@ private struct ElementMetadata {
     let labelText: String?
 }
 
-/// Build deterministic element ordering based on DFS traversal of view hierarchy
-/// This ensures consistent numbering between YAML and screenshot overlays
-internal func buildElementOrdering(from rootView: UIView) -> [String: Int] {
+/// Extracts the pointer-like address substring (e.g., 0x7ffeead0) from a view's description.
+private func addressFromDescription(_ description: String) -> String? {
+    if let range = description.range(of: #"0x[0-9a-fA-F]+"#, options: .regularExpression) {
+        return String(description[range])
+    }
+    return nil
+}
+
+/// Build element ordering and text map in a single pass.
+/// Ordering is top-to-bottom, then left-to-right on screen (more logical than pointer order),
+/// and assigned incrementally starting from 1.
+internal func buildElementOrderingAndTextMap(from rootView: UIView) -> ([String: Int], [String: String], [String: String]) {
     var ordering: [String: Int] = [:]
-    var counter = 1
+    var textMap: [String: String] = [:]
+    var addressMap: [String: String] = [:] // address -> description key
+    var collected: [(key: String, frame: CGRect, address: String?)] = []
 
     func traverse(_ view: UIView) {
-        let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
-        ordering[address] = counter
-        counter += 1
+        let key = view.description
+        let frameInRoot = view.convert(view.bounds, to: rootView)
+        let addr = addressFromDescription(key)
+        collected.append((key: key, frame: frameInRoot, address: addr))
+        if let addr { addressMap[addr] = key }
 
-        // Deterministic order: iterate subviews in array order
+        if let label = view as? UILabel, let text = label.text, !text.isEmpty {
+            textMap[key] = text
+        } else if let button = view as? UIButton, let title = button.title(for: .normal), !title.isEmpty {
+            textMap[key] = title
+        } else if let button = view as? UIButton, let attributedTitle = button.attributedTitle(for: .normal), !attributedTitle.string.isEmpty {
+            textMap[key] = attributedTitle.string
+        }
+
         for subview in view.subviews {
             traverse(subview)
         }
     }
 
     traverse(rootView)
-    return ordering
+
+    collected.sort { lhs, rhs in
+        if lhs.frame.minY != rhs.frame.minY { return lhs.frame.minY < rhs.frame.minY }
+        if lhs.frame.minX != rhs.frame.minX { return lhs.frame.minX < rhs.frame.minX }
+        if lhs.frame.height != rhs.frame.height { return lhs.frame.height < rhs.frame.height }
+        return lhs.key < rhs.key // deterministic tie-breaker
+    }
+
+    for (index, element) in collected.enumerated() {
+        ordering[element.key] = index + 1
+    }
+    return (ordering, textMap, addressMap)
 }
 
 /// Build comprehensive element metadata map including accessibility properties and type-specific info
@@ -612,8 +645,9 @@ private func buildElementMetadataMap(from rootView: UIView, ordering: [String: I
     var metadataMap: [String: ElementMetadata] = [:]
 
     func traverse(_ view: UIView) {
-        let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
-        let hierarchyID = ordering[address] ?? 0
+        let key = view.description
+        let address = addressFromDescription(key) ?? key
+        let hierarchyID = ordering[key] ?? 0
 
         // Extract button-specific properties
         var buttonTitle: String?
@@ -643,7 +677,7 @@ private func buildElementMetadataMap(from rootView: UIView, ordering: [String: I
             labelText: labelText
         )
 
-        metadataMap[address] = metadata
+        metadataMap[key] = metadata
 
         for subview in view.subviews {
             traverse(subview)
@@ -654,35 +688,29 @@ private func buildElementMetadataMap(from rootView: UIView, ordering: [String: I
     return metadataMap
 }
 
-internal func buildElementTextMap(from rootView: UIView) -> [String: String] {
-    var textMap: [String: String] = [:]
+internal func extractFailingElements(from rootView: UIView, using textMap: [String: String], result: GTXResult) -> [Any] {
+    var failingElements: [Any] = []
 
+    let elementAddresses = failingElementAddresses(result: result)
+
+    // Find the actual view objects by traversing hierarchy
     func traverse(_ view: UIView) {
-        let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
-
-        if let label = view as? UILabel, let text = label.text, !text.isEmpty {
-            // Capture full text, not truncated
-            textMap[address] = text
-        } else if let button = view as? UIButton, let title = button.title(for: .normal), !title.isEmpty {
-            textMap[address] = title
-        } else if let button = view as? UIButton, let attributedTitle = button.attributedTitle(for: .normal), !attributedTitle.string.isEmpty {
-            textMap[address] = attributedTitle.string
+        let desc = view.description
+        if let addr = addressFromDescription(desc), elementAddresses.contains(addr) {
+            failingElements.append(view)
         }
-
         for subview in view.subviews {
             traverse(subview)
         }
     }
 
     traverse(rootView)
-    return textMap
+    return failingElements
 }
 
-internal func extractFailingElements(from rootView: UIView, using textMap: [String: String], result: GTXResult) -> [Any] {
-    var failingElements: [Any] = []
+private func failingElementAddresses(result: GTXResult) -> [String] {
     var elementAddresses: [String] = []
 
-    // Extract addresses from error descriptions
     for error in result.errorsFound {
         let errorString = error.localizedDescription
         if let addressMatch = errorString.range(of: #"0x[0-9a-fA-F]+"#, options: .regularExpression) {
@@ -693,19 +721,29 @@ internal func extractFailingElements(from rootView: UIView, using textMap: [Stri
         }
     }
 
-    // Find the actual view objects by traversing hierarchy
-    func traverse(_ view: UIView) {
-        let address = String(format: "%p", unsafeBitCast(view, to: Int.self))
-        if elementAddresses.contains(address) {
-            failingElements.append(view)
-        }
-        for subview in view.subviews {
-            traverse(subview)
-        }
+    return elementAddresses
+}
+
+/// Build a reindexed ordering that only includes failing elements, numbering them 1..N
+/// according to their position in the full visual ordering.
+internal func buildFailingOrdering(result: GTXResult, elementOrdering: [String: Int], addressMap: [String: String]) -> [String: Int] {
+    let addresses = failingElementAddresses(result: result)
+    let sorted = addresses.sorted { lhs, rhs in
+        let lKey = addressMap[lhs]
+        let rKey = addressMap[rhs]
+        let l = lKey.flatMap { elementOrdering[$0] } ?? Int.max
+        let r = rKey.flatMap { elementOrdering[$0] } ?? Int.max
+        if l != r { return l < r }
+        return lhs < rhs
     }
 
-    traverse(rootView)
-    return failingElements
+    var reindexed: [String: Int] = [:]
+    for (idx, addr) in sorted.enumerated() {
+        if let key = addressMap[addr] {
+            reindexed[key] = idx + 1
+        }
+    }
+    return reindexed
 }
 
 internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any], elementOrdering: [String: Int]) -> UIImage? {
@@ -729,13 +767,23 @@ internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any],
     // Render the view hierarchy into the context
     view.layer.render(in: context)
 
+    // Sort failing elements by the visual ordering map so numbers match on-screen order
+    let orderedFailingViews: [UIView] = failingElements
+        .compactMap { view -> (UIView, Int)? in
+            guard let v = view as? UIView else { return nil }
+            let key = v.description
+            guard let order = elementOrdering[key] else { return nil }
+            return (v, order)
+        }
+        .sorted { $0.1 < $1.1 }
+        .map { $0.0 }
+
     // Draw numbered overlays for each failing element using deterministic ordering
-    for element in failingElements {
-        guard let failingView = element as? UIView else { continue }
+    for failingView in orderedFailingViews {
 
         // Get deterministic ID from element ordering
-        let address = String(format: "%p", unsafeBitCast(failingView, to: Int.self))
-        guard let hierarchyID = elementOrdering[address] else {
+        let key = failingView.description
+        guard let hierarchyID = elementOrdering[key] else {
             print("⚠️ Element not found in ordering map: \(failingView)")
             continue
         }
@@ -825,8 +873,12 @@ private struct GTXFormattedResultWithText {
 private func formatGTXResultWithMetadata(fromString raw: String, style: GTXAggregateStyle,
                                         elementsScanned: Int = 0, showPassingSummary: Bool = false,
                                         elementTextMap: [String: String] = [:],
-                                        elementOrdering: [String: Int] = [:]) -> GTXFormattedResultWithText {
-    let elements = parseGTXElementsWithText(from: raw, elementTextMap: elementTextMap, elementOrdering: elementOrdering)
+                                        elementOrdering: [String: Int] = [:],
+                                        addressMap: [String: String] = [:]) -> GTXFormattedResultWithText {
+    let elements = parseGTXElementsWithText(from: raw,
+                                            elementTextMap: elementTextMap,
+                                            elementOrdering: elementOrdering,
+                                            addressMap: addressMap)
 
     guard !elements.isEmpty else {
         return GTXFormattedResultWithText(
@@ -890,7 +942,10 @@ private func formatGTXResultWithMetadata(fromString raw: String, style: GTXAggre
     )
 }
 
-private func parseGTXElementsWithText(from raw: String, elementTextMap: [String: String], elementOrdering: [String: Int]) -> [GTXElementWithText] {
+private func parseGTXElementsWithText(from raw: String,
+                                      elementTextMap: [String: String],
+                                      elementOrdering: [String: Int],
+                                      addressMap: [String: String]) -> [GTXElementWithText] {
     let normalizedLines = raw
         .replacingOccurrences(of: "\r\n", with: "\n")
         .replacingOccurrences(of: "UIExtendedSRGBColorSpace 1 1 1 1", with: "white")
@@ -906,15 +961,19 @@ private func parseGTXElementsWithText(from raw: String, elementTextMap: [String:
     func flush() {
         guard let view = currentView else { return }
 
-        // Try to get full text from the element map using the address
+        // Try to get full text from the element map using the address->description key
         var finalText = currentText
-        if let address = currentElementAddress, let fullText = elementTextMap[address] {
+        if let address = currentElementAddress,
+           let key = addressMap[address],
+           let fullText = elementTextMap[key] {
             finalText = fullText
         }
 
-        // Get deterministic ID from element ordering (or use fallback counter)
+        // Get deterministic ID from element ordering using description key
         let hierarchyID: Int
-        if let address = currentElementAddress, let id = elementOrdering[address] {
+        if let address = currentElementAddress,
+           let key = addressMap[address],
+           let id = elementOrdering[key] {
             hierarchyID = id
         } else {
             // Fallback: use sequential numbering if address not found
@@ -1072,12 +1131,9 @@ private func yamlString(_ value: String) -> String {
     if value.isEmpty {
         return "\"\""
     }
+    // Escape if contains special characters
     if value.contains("\"") || value.contains("\n") || value.contains(":") || value.contains("#") {
-        var escaped = value
-        escaped = escaped.replacingOccurrences(of: "\\", with: "\\\\")
-        escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
-        escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
-        escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
+        let escaped = value.replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
     }
     return "\"\(value)\""
@@ -1168,9 +1224,13 @@ internal func formatGTXResultWithMetadataForAggregation(
     fromString raw: String,
     elementsScanned: Int = 0,
     elementTextMap: [String: String] = [:],
-    elementOrdering: [String: Int] = [:]
+    elementOrdering: [String: Int] = [:],
+    addressMap: [String: String] = [:]
 ) -> GTXFormattedResult {
-    let elements = parseGTXElementsWithText(from: raw, elementTextMap: elementTextMap, elementOrdering: elementOrdering)
+    let elements = parseGTXElementsWithText(from: raw,
+                                            elementTextMap: elementTextMap,
+                                            elementOrdering: elementOrdering,
+                                            addressMap: addressMap)
 
     guard !elements.isEmpty else {
         return GTXFormattedResult(
