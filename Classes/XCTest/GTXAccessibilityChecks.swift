@@ -103,6 +103,17 @@ public func verifyAccessibility(
                 elements: []
             )
             saveGTXResultAsYAML(passingResult, to: snapshotPath)
+
+            #if canImport(XCTest)
+            // Add XCTest attachments for passing tests (YAML only)
+            addGTXAttachments(
+                yamlPath: snapshotPath,
+                screenshotPath: nil,
+                testPassed: true,
+                elementCount: 0,
+                checkFailureCount: 0
+            )
+            #endif
         }
         return nil
     }
@@ -128,8 +139,10 @@ public func verifyAccessibility(
         saveGTXResultAsYAML(formattedResult, to: snapshotPath)
 
         // Smart screenshot regeneration: save if requested OR if screenshot is missing
+        let finalScreenshotPath = screenshotPath ?? snapshotPath.replacingOccurrences(of: ".yaml", with: "_screenshot.png")
+        var screenshotCreated = false
+
         if saveScreenshot {
-            let finalScreenshotPath = screenshotPath ?? snapshotPath.replacingOccurrences(of: ".yaml", with: "_screenshot.png")
             let screenshotMissing = !FileManager.default.fileExists(atPath: finalScreenshotPath)
 
             // Generate screenshot if explicitly requested or if it's missing
@@ -144,15 +157,54 @@ public func verifyAccessibility(
 
                     if let imageData = screenshot.pngData() {
                         try? imageData.write(to: URL(fileURLWithPath: finalScreenshotPath))
+                        screenshotCreated = true
                         let regeneratedNote = screenshotMissing ? " (regenerated - was missing)" : ""
                         print("📸 GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)\(regeneratedNote)")
                     }
                 }
             }
         }
+
+        #if canImport(XCTest)
+        // Add XCTest attachments for failing tests
+        addGTXAttachments(
+            yamlPath: snapshotPath,
+            screenshotPath: screenshotCreated ? finalScreenshotPath : nil,
+            testPassed: false,
+            elementCount: formattedResult.elementCount,
+            checkFailureCount: formattedResult.totalCheckFailures
+        )
+        #endif
     }
 
-    return formattedResult.formattedMessage
+    // Build enhanced error message for test failures
+    var errorMessage = formattedResult.formattedMessage
+
+    if let snapshotPath = snapshotPath {
+        errorMessage += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        errorMessage += "📋 Accessibility Snapshot Mismatch\n"
+        errorMessage += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        errorMessage += "Summary:\n"
+        errorMessage += "  • Elements with failures: \(formattedResult.elementCount)\n"
+        errorMessage += "  • Total check failures: \(formattedResult.totalCheckFailures)\n"
+        errorMessage += "  • Total elements scanned: \(formattedResult.elementsScanned)\n"
+        errorMessage += "\nReport Files:\n"
+        errorMessage += "  • YAML Report: \(snapshotPath)\n"
+
+        let finalScreenshotPath = screenshotPath ?? snapshotPath.replacingOccurrences(of: ".yaml", with: "_screenshot.png")
+        if FileManager.default.fileExists(atPath: finalScreenshotPath) {
+            errorMessage += "  • Screenshot: \(finalScreenshotPath)\n"
+        }
+
+        #if canImport(XCTest)
+        if isRunningInXcodeTestEnvironment() {
+            errorMessage += "\n💡 Tip: View attachments in Xcode's test report for YAML and screenshot\n"
+        }
+        #endif
+        errorMessage += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    }
+
+    return errorMessage
 }
 
 /// Run GTX checks on a view and return formatted results without failing.
@@ -1112,3 +1164,59 @@ private func saveGTXResultAsYAML(_ result: GTXFormattedResultWithText, to path: 
 private func fail(_ message: String, file: String, line: UInt) {
     assertionFailure(message)
 }
+
+// MARK: - XCTest Attachment Support
+
+#if canImport(XCTest)
+/// Checks if running in an Xcode test environment where XCTAttachments can be added
+private func isRunningInXcodeTestEnvironment() -> Bool {
+    let environment = ProcessInfo.processInfo.environment
+    return environment.keys.contains("__XCODE_BUILT_PRODUCTS_DIR_PATHS") ||
+           environment.keys.contains("XCTestConfigurationFilePath")
+}
+
+/// Creates and adds XCTest attachments for accessibility reports
+/// - Parameters:
+///   - yamlPath: Path to the YAML report file
+///   - screenshotPath: Optional path to the screenshot file
+///   - testPassed: Whether the accessibility checks passed
+///   - elementCount: Number of elements with failures (0 for passing tests)
+///   - checkFailureCount: Total number of check failures
+private func addGTXAttachments(
+    yamlPath: String,
+    screenshotPath: String?,
+    testPassed: Bool,
+    elementCount: Int,
+    checkFailureCount: Int
+) {
+    guard isRunningInXcodeTestEnvironment() else {
+        return // Not in XCTest environment, skip attachments
+    }
+
+    // Attach YAML report
+    if FileManager.default.fileExists(atPath: yamlPath) {
+        let yamlAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: yamlPath))
+        let statusPrefix = testPassed ? "✅ PASSED" : "❌ FAILED"
+        yamlAttachment.name = "\(statusPrefix) - GTX Accessibility Report"
+        yamlAttachment.lifetime = .keepAlways
+        XCTContext.runActivity(named: "GTX Accessibility Report") { activity in
+            activity.add(yamlAttachment)
+        }
+    }
+
+    // Attach screenshot (if available)
+    if let screenshotPath = screenshotPath,
+       FileManager.default.fileExists(atPath: screenshotPath) {
+        let screenshotAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: screenshotPath))
+        if testPassed {
+            screenshotAttachment.name = "✅ GTX Screenshot (All Checks Passed)"
+        } else {
+            screenshotAttachment.name = "❌ GTX Screenshot (\(elementCount) failing elements, \(checkFailureCount) check failures)"
+        }
+        screenshotAttachment.lifetime = .keepAlways
+        XCTContext.runActivity(named: "GTX Screenshot") { activity in
+            activity.add(screenshotAttachment)
+        }
+    }
+}
+#endif
