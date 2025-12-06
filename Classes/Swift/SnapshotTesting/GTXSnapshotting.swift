@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import GTXiLib
 
 #if canImport(XCTest)
 import XCTest

@@ -74,7 +74,10 @@ objc_library(
 
 swift_library(
     name = "gtx_swift_xctest",
-    srcs = glob(["Classes/XCTest/*.swift"]),
+    srcs = glob([
+        "Classes/XCTest/*.swift",
+        "Classes/Swift/**/*.swift",
+    ]),
     module_name = "GTXAccessibilityChecks",
     deps = [":gtx_objc_core"],
 )
