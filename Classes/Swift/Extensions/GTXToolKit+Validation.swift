@@ -7,6 +7,10 @@
 
 import Foundation
 import UIKit
+import GTXiLib
+#if canImport(XCTest)
+    import XCTest
+#endif
 
 // MARK: - GTXToolKit Extension for Validation and Aggregation
 
@@ -68,7 +72,7 @@ public extension GTXToolKit {
         GTXLogger.default().setLogLevel(.warning)
 
         // Perform GTX accessibility validation
-        let result = self.resultFromCheckingAllElements(fromRootElements: [view])
+        let result = resultFromCheckingAllElements(fromRootElements: [view])
 
         // Build element ordering for consistent IDs
         let (elementOrdering, elementTextMap, addressMap) = buildElementOrderingAndTextMap(from: view)
@@ -104,7 +108,8 @@ public extension GTXToolKit {
             let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
             if let screenshot = createScreenshotWithOverlays(view: view,
                                                              failingElements: failingElements,
-                                                             elementOrdering: orderingForOutput) {
+                                                             elementOrdering: orderingForOutput)
+            {
                 let parentDir = (screenshotPath as NSString).deletingLastPathComponent
                 if !FileManager.default.fileExists(atPath: parentDir) {
                     try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
@@ -145,7 +150,7 @@ public extension GTXToolKit {
         } else {
             // Check if this is a new test (file or test case doesn't exist)
             let isNewTest = diff?.contains("does not exist") ?? false ||
-                           diff?.contains("not found in saved YAML") ?? false
+                diff?.contains("not found in saved YAML") ?? false
 
             // Save the new/updated content
             do {
@@ -170,6 +175,11 @@ public extension GTXToolKit {
                     print("\n   Review the differences and either:")
                     print("   1. Fix the accessibility issues, or")
                     print("   2. Run tests in recording mode to accept the new results")
+
+                    #if canImport(XCTest)
+                        // Add XCTest attachments for mismatch
+                        addXCTestAttachments(yamlPath: yamlPath, screenshotPath: screenshotPath, formattedResult: formattedResult)
+                    #endif
 
                     return "Accessibility snapshot mismatch - see \(yamlPath)"
                 }
@@ -199,3 +209,42 @@ public extension GTXToolKit {
         )
     }
 }
+
+// MARK: - XCTest Attachment Helper
+
+#if canImport(XCTest)
+    /// Adds XCTest attachments for accessibility snapshot mismatches
+    /// - Parameters:
+    ///   - yamlPath: Path to the YAML report file
+    ///   - screenshotPath: Path to the screenshot file
+    ///   - formattedResult: The formatted result containing failure details
+    private func addXCTestAttachments(yamlPath: String, screenshotPath: String, formattedResult: GTXFormattedResult) {
+        // Check if running in Xcode test environment
+        let environment = ProcessInfo.processInfo.environment
+        guard environment.keys.contains("__XCODE_BUILT_PRODUCTS_DIR_PATHS") ||
+            environment.keys.contains("XCTestConfigurationFilePath")
+        else {
+            return
+        }
+
+        // Attach YAML report
+        if FileManager.default.fileExists(atPath: yamlPath) {
+            let yamlAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: yamlPath))
+            yamlAttachment.name = "❌ FAILED - GTX Accessibility Report"
+            yamlAttachment.lifetime = .keepAlways
+            XCTContext.runActivity(named: "GTX Accessibility Report") { activity in
+                activity.add(yamlAttachment)
+            }
+        }
+
+        // Attach screenshot (if it exists)
+        if FileManager.default.fileExists(atPath: screenshotPath) {
+            let screenshotAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: screenshotPath))
+            screenshotAttachment.name = "❌ GTX Screenshot (\(formattedResult.elementCount) failing elements, \(formattedResult.totalCheckFailures) check failures)"
+            screenshotAttachment.lifetime = .keepAlways
+            XCTContext.runActivity(named: "GTX Screenshot") { activity in
+                activity.add(screenshotAttachment)
+            }
+        }
+    }
+#endif
