@@ -68,8 +68,8 @@ public extension GTXToolKit {
         view.setNeedsLayout()
         view.layoutIfNeeded()
 
-        // Disable verbose GTX logging (those [GTX_LOG Error] messages)
-        GTXLogger.default().setLogLevel(.warning)
+        // Disable verbose GTX logging (those [GTX_LOG] messages)
+        GTXLogger.default().setLogLevel(.silent)
 
         // Perform GTX accessibility validation
         let result = resultFromCheckingAllElements(fromRootElements: [view])

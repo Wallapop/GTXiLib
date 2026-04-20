@@ -85,6 +85,9 @@ NSString *const kGTXLoggerDeveloperLogPrefix = @"Dev ";
 - (void)logWithMaxLevel:(GTXLogLevel)maxLevel
                  prefix:(NSString *)prefix
     descriptionOfObject:(NSObject *)object {
+  if (_logLevel == GTXLogLevelSilent) {
+    return;
+  }
   [self logWithLevel:_logLevel
               format:@"%@%@", prefix,
                      [GTXLogger gtx_loggableDescriptionOfObject:object
