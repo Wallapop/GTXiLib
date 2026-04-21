@@ -170,7 +170,11 @@ public class GTXAggregator {
                             yaml += "        accessibilityFrame: \(yamlString(a11yFrame))\n"
                         }
                         yaml += "        checks:\n"
-                        for check in element.checks {
+                        // Dedup checks by (name, reason) — GTX may emit the same
+                        // failure multiple times per element, non-deterministically
+                        // between local and CI scan paths.
+                        var seenChecks = Set<String>()
+                        for check in element.checks where seenChecks.insert("\(check.name)|\(check.reason ?? "")").inserted {
                             yaml += "          - name: \(yamlString(check.name))\n"
                             yaml += "            reason: \(yamlString(check.reason ?? ""))\n"
                         }
@@ -266,7 +270,13 @@ public class GTXAggregator {
                         yaml += "      accessibilityFrame: \(yamlString(a11yFrame))\n"
                     }
                     yaml += "      checks:\n"
-                    for check in element.checks {
+                    // Dedup checks by (name, reason) — GTX raw output may repeat
+                    // the same failure for one element (e.g. reported once per
+                    // trait evaluated) and the repetition is environment-dependent.
+                    // Normalizing here makes saved/current comparison stable across
+                    // local/CI scan paths.
+                    var seenChecks = Set<String>()
+                    for check in element.checks where seenChecks.insert("\(check.name)|\(check.reason ?? "")").inserted {
                         yaml += "        - name: \(yamlString(check.name))\n"
                         yaml += "          reason: \(yamlString(check.reason ?? ""))\n"
                     }
@@ -449,7 +459,11 @@ public class GTXAggregator {
                             yaml += "        accessibilityFrame: \(yamlString(a11yFrame))\n"
                         }
                         yaml += "        checks:\n"
-                        for check in element.checks {
+                        // Dedup checks by (name, reason) — GTX may emit the same
+                        // failure multiple times per element, non-deterministically
+                        // between local and CI scan paths.
+                        var seenChecks = Set<String>()
+                        for check in element.checks where seenChecks.insert("\(check.name)|\(check.reason ?? "")").inserted {
                             yaml += "          - name: \(yamlString(check.name))\n"
                             yaml += "            reason: \(yamlString(check.reason ?? ""))\n"
                         }
