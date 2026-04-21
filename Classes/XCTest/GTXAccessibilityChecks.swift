@@ -603,13 +603,18 @@ internal func buildElementOrderingAndTextMap(from rootView: UIView) -> ([String:
     var ordering: [String: Int] = [:]
     var textMap: [String: String] = [:]
     var addressMap: [String: String] = [:] // address -> description key
-    var collected: [(key: String, frame: CGRect, address: String?)] = []
+    // traversalIndex is the depth-first hierarchy order; used as the final
+    // tiebreaker so ordering does not depend on pointer addresses (view.description
+    // contains e.g. "0x107432550" which is non-deterministic across runs/machines).
+    var collected: [(key: String, frame: CGRect, address: String?, traversalIndex: Int)] = []
+    var traversalCounter = 0
 
     func traverse(_ view: UIView) {
         let key = view.description
         let frameInRoot = view.convert(view.bounds, to: rootView)
         let addr = addressFromDescription(key)
-        collected.append((key: key, frame: frameInRoot, address: addr))
+        collected.append((key: key, frame: frameInRoot, address: addr, traversalIndex: traversalCounter))
+        traversalCounter += 1
         if let addr { addressMap[addr] = key }
 
         if let label = view as? UILabel, let text = label.text, !text.isEmpty {
@@ -631,7 +636,7 @@ internal func buildElementOrderingAndTextMap(from rootView: UIView) -> ([String:
         if lhs.frame.minY != rhs.frame.minY { return lhs.frame.minY < rhs.frame.minY }
         if lhs.frame.minX != rhs.frame.minX { return lhs.frame.minX < rhs.frame.minX }
         if lhs.frame.height != rhs.frame.height { return lhs.frame.height < rhs.frame.height }
-        return lhs.key < rhs.key // deterministic tie-breaker
+        return lhs.traversalIndex < rhs.traversalIndex
     }
 
     for (index, element) in collected.enumerated() {
@@ -728,13 +733,18 @@ private func failingElementAddresses(result: GTXResult) -> [String] {
 /// according to their position in the full visual ordering.
 internal func buildFailingOrdering(result: GTXResult, elementOrdering: [String: Int], addressMap: [String: String]) -> [String: Int] {
     let addresses = failingElementAddresses(result: result)
+    // Tiebreaker when two failing elements resolve to the same elementOrdering rank
+    // (or both fall through to Int.max): compare by address rank within the original
+    // address list (which is the order GTX reported failures), not by raw address
+    // string, since raw addresses are non-deterministic across runs.
+    let addressRank: [String: Int] = Dictionary(uniqueKeysWithValues: addresses.enumerated().map { ($1, $0) })
     let sorted = addresses.sorted { lhs, rhs in
         let lKey = addressMap[lhs]
         let rKey = addressMap[rhs]
         let l = lKey.flatMap { elementOrdering[$0] } ?? Int.max
         let r = rKey.flatMap { elementOrdering[$0] } ?? Int.max
         if l != r { return l < r }
-        return lhs < rhs
+        return (addressRank[lhs] ?? 0) < (addressRank[rhs] ?? 0)
     }
 
     var reindexed: [String: Int] = [:]

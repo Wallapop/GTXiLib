@@ -103,8 +103,11 @@ public extension GTXToolKit {
             )
         }
 
-        // Generate screenshot if there are failures
-        if formattedResult.hasFailures {
+        // Generate screenshot if there are failures.
+        // Only write to disk in recordingMode; otherwise the overlay PNG pollutes
+        // source reference files every test run and triggers Bazel's
+        // --guard_against_concurrent_changes warnings.
+        if recordingMode, formattedResult.hasFailures {
             let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
             if let screenshot = createScreenshotWithOverlays(view: view,
                                                              failingElements: failingElements,
