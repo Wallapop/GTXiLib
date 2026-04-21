@@ -103,94 +103,93 @@ public extension GTXToolKit {
             )
         }
 
-        // Generate screenshot if there are failures.
-        // Only write to disk in recordingMode; otherwise the overlay PNG pollutes
-        // source reference files every test run and triggers Bazel's
-        // --guard_against_concurrent_changes warnings.
-        if recordingMode, formattedResult.hasFailures {
-            let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
-            if let screenshot = createScreenshotWithOverlays(view: view,
-                                                             failingElements: failingElements,
-                                                             elementOrdering: orderingForOutput)
-            {
-                let parentDir = (screenshotPath as NSString).deletingLastPathComponent
-                if !FileManager.default.fileExists(atPath: parentDir) {
-                    try? FileManager.default.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
-                }
+        // Helper that materializes the overlay PNG + current-run YAML into a
+        // destination directory. Used both for recording mode (writes to the
+        // source reference directory) and for non-recording failures (writes
+        // to a temp dir so Xcode can attach them without polluting the source
+        // tree — which would trip Bazel's --guard_against_concurrent_changes).
+        func writeDiagnostics(into directory: String,
+                              yamlFilename: String,
+                              pngFilename: String) -> (yaml: String?, png: String?) {
+            try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
 
-                if let imageData = screenshot.pngData() {
-                    try? imageData.write(to: URL(fileURLWithPath: screenshotPath))
-                    print("📸 GTX screenshot with numbered overlays saved to: \(screenshotPath)")
+            var writtenYAML: String?
+            var writtenPNG: String?
+
+            if formattedResult.hasFailures {
+                let failingElements = extractFailingElements(from: view, using: elementTextMap, result: result)
+                if let screenshot = createScreenshotWithOverlays(view: view,
+                                                                 failingElements: failingElements,
+                                                                 elementOrdering: orderingForOutput),
+                   let imageData = screenshot.pngData()
+                {
+                    let dest = (directory as NSString).appendingPathComponent(pngFilename)
+                    if (try? imageData.write(to: URL(fileURLWithPath: dest))) != nil {
+                        writtenPNG = dest
+                    }
                 }
             }
+
+            let yamlDest = (directory as NSString).appendingPathComponent(yamlFilename)
+            let scratch = GTXAggregator(aggregatedYAMLPath: yamlDest)
+            scratch.addTestResult(testName, result: formattedResult, screenshotName: pngFilename)
+            if (try? scratch.save()) != nil {
+                writtenYAML = yamlDest
+            }
+            return (writtenYAML, writtenPNG)
         }
 
-        // Initialize aggregator and check what's saved
-        let aggregator = GTXAggregator(aggregatedYAMLPath: yamlPath)
-
-        // In recording mode, just add and save without comparing
+        // In recording mode, write PNG + YAML to the source reference directory.
         if recordingMode {
-            aggregator.addTestResult(testName, result: formattedResult, screenshotName: screenshotFilename)
-            do {
-                try aggregator.save()
-                print("📝 Results recorded to: \(yamlPath)")
-            } catch {
-                print("⚠️ Failed to save aggregated YAML: \(error)")
-                return "Failed to save aggregated YAML: \(error)"
-            }
+            let yamlFilename = (yamlPath as NSString).lastPathComponent
+            _ = writeDiagnostics(into: accessibilityDir, yamlFilename: yamlFilename, pngFilename: screenshotFilename)
+            print("📝 Results recorded to: \(yamlPath)")
             return nil
         }
 
-        // Normal mode: Compare NEW result with saved test case
-        // First, temporarily add to create a comparable state
+        // Non-recording mode: compare NEW result against the saved YAML on disk.
+        // Use an in-memory aggregator loaded from the existing file so we do NOT
+        // write anything back to the source tree.
+        let aggregator = GTXAggregator(aggregatedYAMLPath: yamlPath)
         aggregator.addTestResult(testName, result: formattedResult, screenshotName: screenshotFilename)
         let (contentMatches, diff) = aggregator.compareTestCase(testName)
 
         if contentMatches {
-            // Test case matches - don't write anything, just pass
             print("✅ Accessibility validation matches saved snapshot")
             return nil
-        } else {
-            // Check if this is a new test (file or test case doesn't exist)
-            let isNewTest = diff?.contains("does not exist") ?? false ||
-                diff?.contains("not found in saved YAML") ?? false
-
-            // Save the new/updated content
-            do {
-                try aggregator.save()
-
-                if isNewTest {
-                    // New test - save and fail (standard snapshot behavior)
-                    print("📝 New accessibility snapshot recorded to: \(yamlPath)")
-                    print("   No reference was found. Automatically saved a new reference.")
-                    print("   Re-run tests to compare against this reference.")
-                    return "Recorded new accessibility snapshot"
-                } else {
-                    // Existing test with differences - fail
-                    print("❌ Accessibility validation failed: Results differ from saved snapshot")
-                    print("   Updated report saved to: \(yamlPath)")
-
-                    // Print the diff to help debug
-                    if let diff = diff {
-                        print(diff)
-                    }
-
-                    print("\n   Review the differences and either:")
-                    print("   1. Fix the accessibility issues, or")
-                    print("   2. Run tests in recording mode to accept the new results")
-
-                    #if canImport(XCTest)
-                        // Add XCTest attachments for mismatch
-                        addXCTestAttachments(yamlPath: yamlPath, screenshotPath: screenshotPath, formattedResult: formattedResult)
-                    #endif
-
-                    return "Accessibility snapshot mismatch - see \(yamlPath)"
-                }
-            } catch {
-                print("⚠️ Failed to save aggregated YAML: \(error)")
-                return "Failed to save aggregated YAML: \(error)"
-            }
         }
+
+        let isNewTest = diff?.contains("does not exist") ?? false ||
+            diff?.contains("not found in saved YAML") ?? false
+
+        // Write diagnostics (PNG + current YAML) to a temp dir for attachment.
+        let tempDir = (NSTemporaryDirectory() as NSString).appendingPathComponent("gtx-\(UUID().uuidString)")
+        let tempYAMLFilename = (yamlPath as NSString).lastPathComponent
+        let diagnostics = writeDiagnostics(into: tempDir,
+                                           yamlFilename: tempYAMLFilename,
+                                           pngFilename: screenshotFilename)
+
+        if isNewTest {
+            print("📝 No reference found for \(testName). Run in recording mode to create one.")
+        } else {
+            print("❌ Accessibility validation failed: Results differ from saved snapshot")
+            if let diff { print(diff) }
+            print("\n   Review the differences and either:")
+            print("   1. Fix the accessibility issues, or")
+            print("   2. Run tests in recording mode to accept the new results")
+        }
+
+        #if canImport(XCTest)
+            addXCTestAttachments(yamlPath: diagnostics.yaml ?? yamlPath,
+                                 screenshotPath: diagnostics.png ?? screenshotPath,
+                                 diff: diff,
+                                 formattedResult: formattedResult)
+        #endif
+
+        if isNewTest {
+            return "Recorded new accessibility snapshot"
+        }
+        return "Accessibility snapshot mismatch - see \(yamlPath)"
     }
 
     /// Convenience method without custom managers
@@ -216,13 +215,16 @@ public extension GTXToolKit {
 // MARK: - XCTest Attachment Helper
 
 #if canImport(XCTest)
-    /// Adds XCTest attachments for accessibility snapshot mismatches
+    /// Adds XCTest attachments for accessibility snapshot mismatches.
     /// - Parameters:
-    ///   - yamlPath: Path to the YAML report file
-    ///   - screenshotPath: Path to the screenshot file
-    ///   - formattedResult: The formatted result containing failure details
-    private func addXCTestAttachments(yamlPath: String, screenshotPath: String, formattedResult: GTXFormattedResult) {
-        // Check if running in Xcode test environment
+    ///   - yamlPath: Path to the current-run YAML report (may be a temp path).
+    ///   - screenshotPath: Path to the overlay screenshot (may be a temp path).
+    ///   - diff: The textual diff between saved and current YAML, if available.
+    ///   - formattedResult: The formatted result containing failure counts.
+    private func addXCTestAttachments(yamlPath: String,
+                                      screenshotPath: String,
+                                      diff: String?,
+                                      formattedResult: GTXFormattedResult) {
         let environment = ProcessInfo.processInfo.environment
         guard environment.keys.contains("__XCODE_BUILT_PRODUCTS_DIR_PATHS") ||
             environment.keys.contains("XCTestConfigurationFilePath")
@@ -230,22 +232,25 @@ public extension GTXToolKit {
             return
         }
 
-        // Attach YAML report
-        if FileManager.default.fileExists(atPath: yamlPath) {
-            let yamlAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: yamlPath))
-            yamlAttachment.name = "❌ FAILED - GTX Accessibility Report"
-            yamlAttachment.lifetime = .keepAlways
-            XCTContext.runActivity(named: "GTX Accessibility Report") { activity in
+        XCTContext.runActivity(named: "GTX Accessibility Failure") { activity in
+            if let diff {
+                let diffAttachment = XCTAttachment(string: diff)
+                diffAttachment.name = "❌ GTX Accessibility Diff"
+                diffAttachment.lifetime = .keepAlways
+                activity.add(diffAttachment)
+            }
+
+            if FileManager.default.fileExists(atPath: yamlPath) {
+                let yamlAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: yamlPath))
+                yamlAttachment.name = "❌ GTX Current YAML"
+                yamlAttachment.lifetime = .keepAlways
                 activity.add(yamlAttachment)
             }
-        }
 
-        // Attach screenshot (if it exists)
-        if FileManager.default.fileExists(atPath: screenshotPath) {
-            let screenshotAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: screenshotPath))
-            screenshotAttachment.name = "❌ GTX Screenshot (\(formattedResult.elementCount) failing elements, \(formattedResult.totalCheckFailures) check failures)"
-            screenshotAttachment.lifetime = .keepAlways
-            XCTContext.runActivity(named: "GTX Screenshot") { activity in
+            if FileManager.default.fileExists(atPath: screenshotPath) {
+                let screenshotAttachment = XCTAttachment(contentsOfFile: URL(fileURLWithPath: screenshotPath))
+                screenshotAttachment.name = "❌ GTX Screenshot (\(formattedResult.elementCount) failing elements, \(formattedResult.totalCheckFailures) check failures)"
+                screenshotAttachment.lifetime = .keepAlways
                 activity.add(screenshotAttachment)
             }
         }
