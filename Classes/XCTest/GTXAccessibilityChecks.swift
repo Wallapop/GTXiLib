@@ -195,7 +195,7 @@ public func verifyAccessibility(
                     if let imageData = screenshot.pngData() {
                         try? imageData.write(to: URL(fileURLWithPath: finalScreenshotPath))
                         let regeneratedNote = screenshotMissing ? " (regenerated - was missing)" : ""
-                        print("📸 GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)\(regeneratedNote)")
+                        print("GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)\(regeneratedNote)")
                     }
                 }
             }
@@ -763,14 +763,14 @@ internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any],
     // Get the view's size
     let bounds = view.bounds
     guard bounds.width > 0, bounds.height > 0 else {
-        print("⚠️ View has zero size, cannot create screenshot")
+        print("View has zero size, cannot create screenshot")
         return nil
     }
 
     // Create a graphics context
     UIGraphicsBeginImageContextWithOptions(bounds.size, false, UIScreen.main.scale)
     guard let context = UIGraphicsGetCurrentContext() else {
-        print("⚠️ Could not create graphics context")
+        print("Could not create graphics context")
         return nil
     }
 
@@ -794,7 +794,7 @@ internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any],
         // Get deterministic ID from element ordering
         let key = failingView.description
         guard let hierarchyID = elementOrdering[key] else {
-            print("⚠️ Element not found in ordering map: \(failingView)")
+            print("Element not found in ordering map: \(failingView)")
             continue
         }
 
@@ -989,7 +989,7 @@ private func parseGTXElementsWithText(from raw: String,
             // Fallback: use sequential numbering if address not found
             hierarchyID = elements.count + 1
             if let address = currentElementAddress {
-                print("⚠️ Element address \(address) not found in ordering map, using fallback ID: \(hierarchyID)")
+                print("Element address \(address) not found in ordering map, using fallback ID: \(hierarchyID)")
             }
         }
 
@@ -1222,7 +1222,7 @@ private func saveGTXResultAsYAML(_ result: GTXFormattedResultWithText, to path: 
         let statusIcon = result.hasFailures ? "⚠️" : "✅"
         print("\(statusIcon) GTX accessibility report saved to: \(finalPath)")
     } catch {
-        print("⚠️ Failed to save GTX report to \(finalPath): \(error)")
+        print("Failed to save GTX report to \(finalPath): \(error)")
     }
 }
 

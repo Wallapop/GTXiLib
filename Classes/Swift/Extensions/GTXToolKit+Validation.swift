@@ -62,7 +62,7 @@ public extension GTXToolKit {
         // Extract just the screenshot filename (not full path) for YAML reference
         let screenshotFilename = (screenshotPath as NSString).lastPathComponent
 
-        print("📸 Running GTX accessibility validation for: \(moduleName)")
+        print("Running GTX accessibility validation for: \(moduleName)")
 
         // Ensure view is fully laid out before validation
         view.setNeedsLayout()
@@ -143,7 +143,7 @@ public extension GTXToolKit {
         if recordingMode {
             let yamlFilename = (yamlPath as NSString).lastPathComponent
             _ = writeDiagnostics(into: accessibilityDir, yamlFilename: yamlFilename, pngFilename: screenshotFilename)
-            print("📝 Results recorded to: \(yamlPath)")
+            print("Results recorded to: \(yamlPath)")
             return nil
         }
 
@@ -155,7 +155,7 @@ public extension GTXToolKit {
         let (contentMatches, diff) = aggregator.compareTestCase(testName)
 
         if contentMatches {
-            print("✅ Accessibility validation matches saved snapshot")
+            print("Accessibility validation matches saved snapshot")
             return nil
         }
 
@@ -170,9 +170,9 @@ public extension GTXToolKit {
                                            pngFilename: screenshotFilename)
 
         if isNewTest {
-            print("📝 No reference found for \(testName). Run in recording mode to create one.")
+            print("No reference found for \(testName). Run in recording mode to create one.")
         } else {
-            print("❌ Accessibility validation failed: Results differ from saved snapshot")
+            print("Accessibility validation failed: Results differ from saved snapshot")
             if let diff { print(diff) }
             print("\n   Review the differences and either:")
             print("   1. Fix the accessibility issues, or")
