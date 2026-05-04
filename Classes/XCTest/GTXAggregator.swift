@@ -97,8 +97,8 @@ public class GTXAggregator {
             do {
                 try loadExistingReport()
             } catch {
-                print("⚠️ Failed to load existing aggregated YAML: \(error)")
-                print("   Starting with empty test case collection")
+                print("Failed to load existing aggregated YAML: \(error)")
+                print("Starting with empty test case collection")
             }
         }
     }
@@ -170,7 +170,11 @@ public class GTXAggregator {
                             yaml += "        accessibilityFrame: \(yamlString(a11yFrame))\n"
                         }
                         yaml += "        checks:\n"
-                        for check in element.checks {
+                        // Dedup checks by (name, reason) — GTX may emit the same
+                        // failure multiple times per element, non-deterministically
+                        // between local and CI scan paths.
+                        var seenChecks = Set<String>()
+                        for check in element.checks where seenChecks.insert("\(check.name)|\(check.reason ?? "")").inserted {
                             yaml += "          - name: \(yamlString(check.name))\n"
                             yaml += "            reason: \(yamlString(check.reason ?? ""))\n"
                         }
@@ -266,7 +270,13 @@ public class GTXAggregator {
                         yaml += "      accessibilityFrame: \(yamlString(a11yFrame))\n"
                     }
                     yaml += "      checks:\n"
-                    for check in element.checks {
+                    // Dedup checks by (name, reason) — GTX raw output may repeat
+                    // the same failure for one element (e.g. reported once per
+                    // trait evaluated) and the repetition is environment-dependent.
+                    // Normalizing here makes saved/current comparison stable across
+                    // local/CI scan paths.
+                    var seenChecks = Set<String>()
+                    for check in element.checks where seenChecks.insert("\(check.name)|\(check.reason ?? "")").inserted {
                         yaml += "        - name: \(yamlString(check.name))\n"
                         yaml += "          reason: \(yamlString(check.reason ?? ""))\n"
                     }
@@ -449,7 +459,11 @@ public class GTXAggregator {
                             yaml += "        accessibilityFrame: \(yamlString(a11yFrame))\n"
                         }
                         yaml += "        checks:\n"
-                        for check in element.checks {
+                        // Dedup checks by (name, reason) — GTX may emit the same
+                        // failure multiple times per element, non-deterministically
+                        // between local and CI scan paths.
+                        var seenChecks = Set<String>()
+                        for check in element.checks where seenChecks.insert("\(check.name)|\(check.reason ?? "")").inserted {
                             yaml += "          - name: \(yamlString(check.name))\n"
                             yaml += "            reason: \(yamlString(check.reason ?? ""))\n"
                         }
@@ -469,7 +483,7 @@ public class GTXAggregator {
 
         // Write atomically (no temp file needed - String.write handles this)
         try yaml.write(toFile: outputPath, atomically: true, encoding: .utf8)
-        print("📝 GTX aggregated report saved to: \(outputPath)")
+        print("GTX aggregated report saved to: \(outputPath)")
     }
 
     // MARK: - Private Helpers

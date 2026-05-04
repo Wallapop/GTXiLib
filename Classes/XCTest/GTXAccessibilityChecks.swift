@@ -195,7 +195,7 @@ public func verifyAccessibility(
                     if let imageData = screenshot.pngData() {
                         try? imageData.write(to: URL(fileURLWithPath: finalScreenshotPath))
                         let regeneratedNote = screenshotMissing ? " (regenerated - was missing)" : ""
-                        print("📸 GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)\(regeneratedNote)")
+                        print("GTX screenshot with numbered overlays saved to: \(finalScreenshotPath)\(regeneratedNote)")
                     }
                 }
             }
@@ -603,13 +603,18 @@ internal func buildElementOrderingAndTextMap(from rootView: UIView) -> ([String:
     var ordering: [String: Int] = [:]
     var textMap: [String: String] = [:]
     var addressMap: [String: String] = [:] // address -> description key
-    var collected: [(key: String, frame: CGRect, address: String?)] = []
+    // traversalIndex is the depth-first hierarchy order; used as the final
+    // tiebreaker so ordering does not depend on pointer addresses (view.description
+    // contains e.g. "0x107432550" which is non-deterministic across runs/machines).
+    var collected: [(key: String, frame: CGRect, address: String?, traversalIndex: Int)] = []
+    var traversalCounter = 0
 
     func traverse(_ view: UIView) {
         let key = view.description
         let frameInRoot = view.convert(view.bounds, to: rootView)
         let addr = addressFromDescription(key)
-        collected.append((key: key, frame: frameInRoot, address: addr))
+        collected.append((key: key, frame: frameInRoot, address: addr, traversalIndex: traversalCounter))
+        traversalCounter += 1
         if let addr { addressMap[addr] = key }
 
         if let label = view as? UILabel, let text = label.text, !text.isEmpty {
@@ -631,7 +636,7 @@ internal func buildElementOrderingAndTextMap(from rootView: UIView) -> ([String:
         if lhs.frame.minY != rhs.frame.minY { return lhs.frame.minY < rhs.frame.minY }
         if lhs.frame.minX != rhs.frame.minX { return lhs.frame.minX < rhs.frame.minX }
         if lhs.frame.height != rhs.frame.height { return lhs.frame.height < rhs.frame.height }
-        return lhs.key < rhs.key // deterministic tie-breaker
+        return lhs.traversalIndex < rhs.traversalIndex
     }
 
     for (index, element) in collected.enumerated() {
@@ -728,13 +733,18 @@ private func failingElementAddresses(result: GTXResult) -> [String] {
 /// according to their position in the full visual ordering.
 internal func buildFailingOrdering(result: GTXResult, elementOrdering: [String: Int], addressMap: [String: String]) -> [String: Int] {
     let addresses = failingElementAddresses(result: result)
+    // Tiebreaker when two failing elements resolve to the same elementOrdering rank
+    // (or both fall through to Int.max): compare by address rank within the original
+    // address list (which is the order GTX reported failures), not by raw address
+    // string, since raw addresses are non-deterministic across runs.
+    let addressRank: [String: Int] = Dictionary(uniqueKeysWithValues: addresses.enumerated().map { ($1, $0) })
     let sorted = addresses.sorted { lhs, rhs in
         let lKey = addressMap[lhs]
         let rKey = addressMap[rhs]
         let l = lKey.flatMap { elementOrdering[$0] } ?? Int.max
         let r = rKey.flatMap { elementOrdering[$0] } ?? Int.max
         if l != r { return l < r }
-        return lhs < rhs
+        return (addressRank[lhs] ?? 0) < (addressRank[rhs] ?? 0)
     }
 
     var reindexed: [String: Int] = [:]
@@ -753,14 +763,14 @@ internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any],
     // Get the view's size
     let bounds = view.bounds
     guard bounds.width > 0, bounds.height > 0 else {
-        print("⚠️ View has zero size, cannot create screenshot")
+        print("View has zero size, cannot create screenshot")
         return nil
     }
 
     // Create a graphics context
     UIGraphicsBeginImageContextWithOptions(bounds.size, false, UIScreen.main.scale)
     guard let context = UIGraphicsGetCurrentContext() else {
-        print("⚠️ Could not create graphics context")
+        print("Could not create graphics context")
         return nil
     }
 
@@ -784,7 +794,7 @@ internal func createScreenshotWithOverlays(view: UIView, failingElements: [Any],
         // Get deterministic ID from element ordering
         let key = failingView.description
         guard let hierarchyID = elementOrdering[key] else {
-            print("⚠️ Element not found in ordering map: \(failingView)")
+            print("Element not found in ordering map: \(failingView)")
             continue
         }
 
@@ -979,7 +989,7 @@ private func parseGTXElementsWithText(from raw: String,
             // Fallback: use sequential numbering if address not found
             hierarchyID = elements.count + 1
             if let address = currentElementAddress {
-                print("⚠️ Element address \(address) not found in ordering map, using fallback ID: \(hierarchyID)")
+                print("Element address \(address) not found in ordering map, using fallback ID: \(hierarchyID)")
             }
         }
 
@@ -1212,7 +1222,7 @@ private func saveGTXResultAsYAML(_ result: GTXFormattedResultWithText, to path: 
         let statusIcon = result.hasFailures ? "⚠️" : "✅"
         print("\(statusIcon) GTX accessibility report saved to: \(finalPath)")
     } catch {
-        print("⚠️ Failed to save GTX report to \(finalPath): \(error)")
+        print("Failed to save GTX report to \(finalPath): \(error)")
     }
 }
 
